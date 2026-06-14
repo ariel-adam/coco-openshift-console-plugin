@@ -5,10 +5,7 @@ RUN npm i -g corepack && corepack enable
 
 ADD . /usr/src/app
 WORKDIR /usr/src/app
-RUN YARN_ENABLE_SCRIPTS=true yarn install --immutable && \
-    node node_modules/esbuild/install.js && \
-    ls -la node_modules/@esbuild/ && \
-    yarn build
+RUN yarn install --immutable && yarn build
 
 FROM registry.access.redhat.com/ubi9/nginx-120:latest
 

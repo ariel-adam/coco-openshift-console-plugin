@@ -4716,9 +4716,6 @@ __metadata:
     webpack: "npm:^5.100.0"
     webpack-cli: "npm:^6.0.1"
     webpack-dev-server: "npm:^5.2.3"
-  dependenciesMeta:
-    esbuild:
-      built: true
   languageName: unknown
   linkType: soft
 

@@ -32,11 +32,14 @@ const TrusteeGpuTab: FC<TrusteeTabProps> = ({ obj }) => {
   const name = obj?.metadata?.name;
   const namespace = obj?.metadata?.namespace ?? '';
 
-  const [cm, loaded] = useK8sWatchResource<ConfigMapKind>({
+  const [cm, loaded, loadError] = useK8sWatchResource<ConfigMapKind>({
     groupVersionKind: ConfigMapGVK,
     name: name ? `${name}-kbs-config` : undefined,
     namespace,
   }) as [ConfigMapKind | undefined, boolean, unknown];
+  // Settled once loaded OR errored — a missing kbs-config 404s and never flips
+  // `loaded`, which would otherwise hang on "Loading…" forever.
+  const settled = loaded || Boolean(loadError);
 
   const cfgText = Object.values(cm?.data ?? {}).join('\n');
   const hasNvidia = /nvidia_verifier/i.test(cfgText);
@@ -65,7 +68,7 @@ const TrusteeGpuTab: FC<TrusteeTabProps> = ({ obj }) => {
               />
             </p>
           )}
-          {!loaded ? (
+          {!settled ? (
             <span className="coco-openshift-console-plugin__muted">{t('Loading…')}</span>
           ) : (
             <DescriptionList isHorizontal>

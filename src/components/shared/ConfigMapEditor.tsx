@@ -48,6 +48,11 @@ const ConfigMapEditor: FC<Props> = ({
     namespace,
   }) as [ConfigMapKind | undefined, boolean, unknown];
 
+  // A named ConfigMap that doesn't exist yet 404s: `loaded` never flips true, only
+  // loadError is set. Gate on settled (loaded OR errored) so the spinner doesn't
+  // spin forever and the "not found" alert below is actually reachable.
+  const settled = loaded || Boolean(loadError);
+
   const keys = useMemo(() => Object.keys(configMap?.data ?? {}), [configMap]);
   const [activeKey, setActiveKey] = useState('');
   const [draft, setDraft] = useState('');
@@ -112,7 +117,7 @@ const ConfigMapEditor: FC<Props> = ({
             namespace={namespace}
           />
         </p>
-        {!loaded ? (
+        {!settled ? (
           <Spinner size="md" aria-label={t('Loading')} />
         ) : loadError ? (
           <Alert variant="warning" isInline title={t('ConfigMap could not be loaded')}>

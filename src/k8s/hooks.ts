@@ -49,12 +49,17 @@ export const useKataConfig = (): [KataConfigKind | undefined, boolean] => {
 
 /** Is confidential containers enabled (osc-feature-gates ConfigMap, confidential: "true")? */
 export const useConfidentialEnabled = (): [boolean | undefined, boolean] => {
-  const [cm, loaded] = useK8sWatchResource<ConfigMapKind>({
+  const [cm, loaded, loadError] = useK8sWatchResource<ConfigMapKind>({
     groupVersionKind: ConfigMapGVK,
     namespace: OSC_NAMESPACE,
     name: OSC_FEATURE_GATES_CM,
   });
-  return [loaded ? cm?.data?.confidential === 'true' : undefined, loaded];
+  // A named resource that doesn't exist yet 404s: loadError is set but `loaded`
+  // never flips true. Treat the watch as settled once it is loaded OR errored, so
+  // consumers that gate on the loaded flag don't show a spinner forever when the
+  // osc-feature-gates ConfigMap is absent (it just reads as "not enabled").
+  const settled = loaded || Boolean(loadError);
+  return [settled ? cm?.data?.confidential === 'true' : undefined, settled];
 };
 
 export const useNodes = (): [NodeKind[], boolean] => {

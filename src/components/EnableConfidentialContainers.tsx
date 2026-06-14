@@ -40,13 +40,20 @@ type ConfigMapKind = K8sResourceCommon & { data?: Record<string, string> };
 export const EnableConfidentialContainers: FC = () => {
   const { t } = useTranslation('plugin__coco-openshift-console-plugin');
 
-  const [cm, loaded] = useK8sWatchResource<ConfigMapKind>({
+  // Watch the ConfigMap as a LIST, not by name. useK8sWatchResource never flips
+  // `loaded` to true for a single *named* resource that does not exist yet, and
+  // osc-feature-gates is absent until CoCo is first enabled — which left the
+  // enable button (isDisabled={!loaded}) permanently greyed out. A namespaced
+  // list loads correctly (empty array when the CM is absent), the same pattern
+  // EnableTdxHost uses for MachineConfigs.
+  const [cms, loaded] = useK8sWatchResource<ConfigMapKind[]>({
     groupVersionKind: ConfigMapGVK,
-    name: OSC_FEATURE_GATES_CM,
     namespace: OSC_NAMESPACE,
+    isList: true,
   });
-  const enabled = loaded && cm?.data?.confidential === 'true';
-  const cmExists = loaded && !!cm?.metadata?.name;
+  const cm = loaded ? cms?.find((c) => c.metadata?.name === OSC_FEATURE_GATES_CM) : undefined;
+  const enabled = !!cm && cm.data?.confidential === 'true';
+  const cmExists = !!cm;
 
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);

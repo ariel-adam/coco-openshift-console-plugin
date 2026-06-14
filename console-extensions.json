@@ -74,6 +74,17 @@
   {
     "type": "console.navigation/href",
     "properties": {
+      "id": "cc-setup",
+      "perspective": "admin",
+      "section": "confidential-containers",
+      "name": "%plugin__coco-openshift-console-plugin~Setup%",
+      "href": "/confidential-containers/setup"
+    },
+    "flags": { "required": ["COCO_KATACONFIG"] }
+  },
+  {
+    "type": "console.navigation/href",
+    "properties": {
       "id": "cc-workloads",
       "perspective": "admin",
       "section": "confidential-containers",
@@ -132,6 +143,15 @@
       "exact": true,
       "path": "/confidential-containers",
       "component": { "$codeRef": "ConfidentialContainersOverview" }
+    },
+    "flags": { "required": ["COCO_KATACONFIG"] }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "exact": true,
+      "path": "/confidential-containers/setup",
+      "component": { "$codeRef": "CocoSetup" }
     },
     "flags": { "required": ["COCO_KATACONFIG"] }
   },

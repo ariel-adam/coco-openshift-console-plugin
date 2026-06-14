@@ -78,6 +78,7 @@
     "description": "Create, configure, manage, and observe confidential containers (Kata + TEE) and the Red Hat build of Trustee attestation service.",
     "exposedModules": {
       "ConfidentialContainersOverview": "./components/ConfidentialContainersOverview",
+      "CocoSetup": "./components/CocoSetup",
       "ConfidentialWorkloadsList": "./components/ConfidentialWorkloadsList",
       "TeeNodesList": "./components/TeeNodesList",
       "RuntimeClassesList": "./components/RuntimeClassesList",

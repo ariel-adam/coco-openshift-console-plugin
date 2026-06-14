@@ -8,13 +8,19 @@ import {
   CardTitle,
   CodeBlock,
   CodeBlockCode,
+  Content,
   Form,
   FormGroup,
+  FormHelperText,
   FormSelect,
   FormSelectOption,
   Grid,
   GridItem,
+  HelperText,
+  HelperTextItem,
   PageSection,
+  ProgressStep,
+  ProgressStepper,
   TextInput,
 } from '@patternfly/react-core';
 import type { FC } from 'react';
@@ -93,6 +99,56 @@ const DeployTrusteeWizard: FC = () => {
       <DocumentTitle>{t('Deploy Trustee')}</DocumentTitle>
       <ListPageHeader title={t('Deploy Trustee')} />
       <PageSection>
+        {/* What Trustee is & what happens after you create it */}
+        <Card className="coco-openshift-console-plugin__mb">
+          <CardBody>
+            <Content component="p">
+              {t(
+                'Trustee is the Red Hat build of the confidential containers attestation service. From this single resource, the operator deploys the Key Broker Service (KBS) and its attestation and resource policies, reference values, and secrets. Your confidential workloads then attest to Trustee when they boot and, if their TEE evidence is trusted, receive their sealed secrets.',
+              )}
+            </Content>
+            <ProgressStepper
+              aria-label={t('Trustee deployment flow')}
+              isCenterAligned
+              className="coco-openshift-console-plugin__mt"
+            >
+              <ProgressStep
+                isCurrent
+                variant="info"
+                id="tc-flow-create"
+                titleId="tc-flow-create-title"
+                description={t('This form')}
+              >
+                {t('Create TrusteeConfig')}
+              </ProgressStep>
+              <ProgressStep
+                variant="pending"
+                id="tc-flow-kbs"
+                titleId="tc-flow-kbs-title"
+                description={t('KBS, policies, secrets')}
+              >
+                {t('Operator deploys KBS')}
+              </ProgressStep>
+              <ProgressStep
+                variant="pending"
+                id="tc-flow-policy"
+                titleId="tc-flow-policy-title"
+                description={t('Expected TEE measurements')}
+              >
+                {t('Set reference values')}
+              </ProgressStep>
+              <ProgressStep
+                variant="pending"
+                id="tc-flow-attest"
+                titleId="tc-flow-attest-title"
+                description={t('kata-cc pods on boot')}
+              >
+                {t('Workloads attest & get secrets')}
+              </ProgressStep>
+            </ProgressStepper>
+          </CardBody>
+        </Card>
+
         <Grid hasGutter>
           <GridItem md={6}>
             <Card>
@@ -107,6 +163,13 @@ const DeployTrusteeWizard: FC = () => {
                         setName(v);
                       }}
                     />
+                    <FormHelperText>
+                      <HelperText>
+                        <HelperTextItem>
+                          {t('A name for this Trustee deployment (the TrusteeConfig resource).')}
+                        </HelperTextItem>
+                      </HelperText>
+                    </FormHelperText>
                   </FormGroup>
                   <FormGroup label={t('Namespace')} isRequired fieldId="tc-namespace">
                     <TextInput
@@ -116,6 +179,15 @@ const DeployTrusteeWizard: FC = () => {
                         setNamespace(v);
                       }}
                     />
+                    <FormHelperText>
+                      <HelperText>
+                        <HelperTextItem>
+                          {t(
+                            'Where the Key Broker Service and its secrets are created. Defaults to the Trustee operator namespace.',
+                          )}
+                        </HelperTextItem>
+                      </HelperText>
+                    </FormHelperText>
                   </FormGroup>
                   <FormGroup label={t('Profile')} fieldId="tc-profile">
                     <FormSelect
@@ -128,6 +200,19 @@ const DeployTrusteeWizard: FC = () => {
                       <FormSelectOption value="Permissive" label={t('Permissive (dev/test)')} />
                       <FormSelectOption value="Restricted" label={t('Restricted (production)')} />
                     </FormSelect>
+                    <FormHelperText>
+                      <HelperText>
+                        <HelperTextItem>
+                          {restricted
+                            ? t(
+                                'Restricted enforces strict attestation policies and requires TLS — use it for production.',
+                              )
+                            : t(
+                                'Permissive accepts most attestation evidence — good for getting started in dev and test.',
+                              )}
+                        </HelperTextItem>
+                      </HelperText>
+                    </FormHelperText>
                   </FormGroup>
                   <FormGroup label={t('KBS service type')} fieldId="tc-service">
                     <FormSelect
@@ -141,6 +226,15 @@ const DeployTrusteeWizard: FC = () => {
                       <FormSelectOption value="NodePort" label="NodePort" />
                       <FormSelectOption value="LoadBalancer" label="LoadBalancer" />
                     </FormSelect>
+                    <FormHelperText>
+                      <HelperText>
+                        <HelperTextItem>
+                          {t(
+                            'How the Key Broker Service is reachable. ClusterIP keeps it in-cluster; use NodePort or LoadBalancer to reach it from a separate (hub-and-spoke) cluster.',
+                          )}
+                        </HelperTextItem>
+                      </HelperText>
+                    </FormHelperText>
                   </FormGroup>
                   <FormGroup
                     label={t('HTTPS TLS secret')}
@@ -156,6 +250,15 @@ const DeployTrusteeWizard: FC = () => {
                       }}
                       placeholder={restricted ? t('Required for Restricted') : t('Optional')}
                     />
+                    <FormHelperText>
+                      <HelperText>
+                        <HelperTextItem variant={httpsRequiredMissing ? 'error' : 'default'}>
+                          {t(
+                            'TLS secret that terminates HTTPS on the KBS endpoint. Required for the Restricted profile.',
+                          )}
+                        </HelperTextItem>
+                      </HelperText>
+                    </FormHelperText>
                   </FormGroup>
                   <FormGroup
                     label={t('Attestation token verification secret (optional)')}
@@ -168,6 +271,15 @@ const DeployTrusteeWizard: FC = () => {
                         setTokenSecret(v);
                       }}
                     />
+                    <FormHelperText>
+                      <HelperText>
+                        <HelperTextItem>
+                          {t(
+                            'Optional TLS secret used to verify attestation tokens issued by KBS.',
+                          )}
+                        </HelperTextItem>
+                      </HelperText>
+                    </FormHelperText>
                   </FormGroup>
 
                   {error && (
@@ -201,13 +313,16 @@ const DeployTrusteeWizard: FC = () => {
 
           <GridItem md={6}>
             <Card>
-              <CardTitle>{t('Preview')}</CardTitle>
+              <CardTitle>{t('Manifest preview')}</CardTitle>
               <CardBody>
-                <p className="coco-openshift-console-plugin__mb coco-openshift-console-plugin__muted">
+                <Content
+                  component="p"
+                  className="coco-openshift-console-plugin__mb coco-openshift-console-plugin__muted"
+                >
                   {t(
-                    'The Trustee operator generates the KBS deployment, attestation and resource policies, reference values, and secrets from this single resource.',
+                    'This is the single resource you are creating. The operator reconciles everything else from it.',
                   )}
-                </p>
+                </Content>
                 <CodeBlock>
                   <CodeBlockCode>{yaml}</CodeBlockCode>
                 </CodeBlock>

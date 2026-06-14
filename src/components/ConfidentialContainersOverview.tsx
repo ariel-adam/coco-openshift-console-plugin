@@ -1,5 +1,6 @@
 import { DocumentTitle, ListPageHeader, ResourceLink } from '@openshift-console/dynamic-plugin-sdk';
 import {
+  Button,
   Card,
   CardBody,
   CardTitle,
@@ -17,6 +18,7 @@ import {
   Title,
 } from '@patternfly/react-core';
 import {
+  ArrowRightIcon,
   CheckCircleIcon,
   ExclamationCircleIcon,
   ExclamationTriangleIcon,
@@ -122,6 +124,13 @@ const GettingStarted: FC = () => {
         {t(
           '3. Build initdata and deploy a pod with runtimeClassName: kata-cc, then verify attestation.',
         )}
+      </FlexItem>
+      <FlexItem className="coco-openshift-console-plugin__mt">
+        <Link to="/confidential-containers/setup">
+          <Button variant="primary" icon={<ArrowRightIcon />} iconPosition="end">
+            {t('Open the setup checklist')}
+          </Button>
+        </Link>
       </FlexItem>
     </Flex>
   );

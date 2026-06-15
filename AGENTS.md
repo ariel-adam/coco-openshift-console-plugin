@@ -1,8 +1,13 @@
 # AI agent instructions — coco-openshift-console-plugin
 
-OpenShift Console dynamic plugin for **confidential containers + Trustee attestation**. This is a
-**sibling of `osc-openshift-console-plugin`** (at `../osc-openshift-console-plugin`); match its stack and conventions exactly. When in
-doubt about a pattern, read the corresponding file in `osc-openshift-console-plugin`.
+OpenShift Console dynamic plugin for **confidential containers** — the `kata-cc` runtime, TEE-capable
+nodes, the `initdata` builder, and confidential workloads. **Attestation (the Red Hat build of
+Trustee) is a separate plugin, `trustee-openshift-console-plugin`** — do not add TrusteeConfig /
+KbsConfig / KBS / policy / reference-value management here; that belongs in the trustee plugin.
+
+This is a **sibling of `osc-openshift-console-plugin`** (at `../osc-openshift-console-plugin`); match
+its stack and conventions exactly. When in doubt about a pattern, read the corresponding file in
+`osc-openshift-console-plugin`.
 
 ## Stack (OCP 4.21 — do not bump without reason)
 
@@ -24,17 +29,19 @@ unless the target console is 4.22+.
 - Any component referenced by `$codeRef` in `console-extensions.json` **must** be listed in
   `package.json` → `consolePlugin.exposedModules`. `package.json` `name` must equal `consolePlugin.name`.
 
-## Domains
+## Domain
 
-Two `console.flag/model`-gated nav sections, one image for every cluster:
+One `console.flag/model`-gated nav section:
 
 - **Confidential Containers** — flag `COCO_KATACONFIG` on `KataConfig` (`kataconfiguration.openshift.io/v1`).
-- **Trustee (Attestation)** — flag `COCO_TRUSTEECONFIG` on `TrusteeConfig`
-  (`trustee.confidentialcontainers.org/v1`; it generates `KbsConfig` + ConfigMaps/Secrets).
+  Covers TEE-node detection/enablement (NFD, the Intel TDX host kernel args), the `kata-cc` /
+  `kata-cc-nvidia-gpu` runtimes, confidential workloads (list + create), and the **initdata builder**.
+
+`initdata` is the bridge to attestation: it references the Trustee KBS URL **as a string** and emits a
+PCR8 reference value to register in Trustee's RVPS — but it does **not** depend on the Trustee CRDs, and
+Trustee is managed by the separate trustee plugin.
 
 ## Verify
 
 `yarn install`, then `yarn lint` and `yarn build` must pass. `tsconfig` is `strict` with
 `noUnusedLocals` — no unused imports/locals.
-
-See `docs/plan.md` for scope and roadmap.

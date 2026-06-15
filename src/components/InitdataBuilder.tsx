@@ -141,7 +141,8 @@ const HowItWorks: FC = () => {
 const InitdataBuilder: FC = () => {
   const { t } = useTranslation('plugin__coco-openshift-console-plugin');
   const navigate = useNavigate();
-  const [trusteeUrl, setTrusteeUrl] = useState('https://kbs-service.trustee-operator-system:8080');
+  const [topology, setTopology] = useState<'colocated' | 'remote'>('colocated');
+  const [trusteeUrl, setTrusteeUrl] = useState('http://kbs-service.trustee-operator-system:8080');
   const [algorithm, setAlgorithm] = useState<HashAlgo>('sha256');
   const [kbsCert, setKbsCert] = useState('');
   const [imageUri, setImageUri] = useState('');
@@ -193,10 +194,48 @@ const InitdataBuilder: FC = () => {
               <CardTitle>{t('1. Configure initdata')}</CardTitle>
               <CardBody>
                 <Form>
+                  <FormGroup label={t('Trustee location')} fieldId="trustee-topology">
+                    <FormSelect
+                      id="trustee-topology"
+                      value={topology}
+                      onChange={(_e, v) => {
+                        const mode = v as 'colocated' | 'remote';
+                        setTopology(mode);
+                        setTrusteeUrl(
+                          mode === 'remote'
+                            ? ''
+                            : 'http://kbs-service.trustee-operator-system:8080',
+                        );
+                      }}
+                    >
+                      <FormSelectOption value="colocated" label={t('Same cluster (co-located)')} />
+                      <FormSelectOption
+                        value="remote"
+                        label={t('Different cluster (hub-and-spoke)')}
+                      />
+                    </FormSelect>
+                  </FormGroup>
+                  {topology === 'remote' && (
+                    <Alert
+                      variant="info"
+                      isInline
+                      title={t('Remote (hub-and-spoke) attestation')}
+                      className="coco-openshift-console-plugin__mb"
+                    >
+                      {t(
+                        'This workload (spoke) attests to a Trustee on another cluster. Use the externally reachable KBS route on 443 (for example https://kbs-route-<ns>.apps.<hub-domain>) — not the in-cluster Service or :8080. If the route is HTTPS with a self-signed or cluster cert, paste that cert below so the guest can trust it. Also confirm on the hub Trustee: its KBS is reachable from this cluster, and it has reference values for this hardware plus this initdata’s PCR8 registered (or a Permissive policy).',
+                      )}
+                    </Alert>
+                  )}
                   <FormGroup label={t('Trustee (KBS) URL')} isRequired fieldId="trustee-url">
                     <TextInput
                       id="trustee-url"
                       value={trusteeUrl}
+                      placeholder={
+                        topology === 'remote'
+                          ? 'https://kbs-route-<ns>.apps.<hub-domain>'
+                          : 'http://kbs-service.<namespace>:8080'
+                      }
                       onChange={(_e, v) => {
                         setTrusteeUrl(v);
                       }}
@@ -205,7 +244,7 @@ const InitdataBuilder: FC = () => {
                       <HelperText>
                         <HelperTextItem>
                           {t(
-                            'Where the guest reaches your Trustee. In-cluster this is kbs-service.<namespace>:8080; in hub-and-spoke it is the externally reachable KBS route.',
+                            'Where the guest reaches your Trustee. Use http:// for an insecure in-cluster KBS, or https:// for a TLS route — then paste its cert below.',
                           )}
                         </HelperTextItem>
                       </HelperText>

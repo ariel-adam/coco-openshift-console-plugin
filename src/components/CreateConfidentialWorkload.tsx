@@ -2,6 +2,7 @@ import {
   DocumentTitle,
   k8sCreate,
   ListPageHeader,
+  useK8sWatchResource,
   type K8sResourceCommon,
 } from '@openshift-console/dynamic-plugin-sdk';
 import {
@@ -11,56 +12,51 @@ import {
   Card,
   CardBody,
   CardTitle,
+  Checkbox,
   CodeBlock,
   CodeBlockCode,
-  ExpandableSection,
   Form,
   FormGroup,
   FormSelect,
   FormSelectOption,
   Grid,
   GridItem,
+  HelperText,
+  HelperTextItem,
+  MenuToggle,
+  type MenuToggleElement,
   PageSection,
+  Select,
+  SelectList,
+  SelectOption,
   TextArea,
   TextInput,
+  TextInputGroup,
+  TextInputGroupMain,
 } from '@patternfly/react-core';
-import type { FC } from 'react';
-import { useState } from 'react';
+import type { FC, Ref } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom-v5-compat';
 import { useTranslation } from 'react-i18next';
-import { CC_INIT_DATA_ANNOTATION, DeploymentModel, PodModel } from '../k8s/resources';
+import {
+  CC_INIT_DATA_ANNOTATION,
+  DeploymentModel,
+  NamespaceGVK,
+  NamespaceModel,
+  PersistentVolumeClaimModel,
+  PodModel,
+  StorageClassGVK,
+} from '../k8s/resources';
+import type { NamespaceKind, StorageClassKind } from '../k8s/types';
 import './coco.css';
 
 type Kind = 'Pod' | 'Deployment';
 type RuntimeClass = 'kata-cc' | 'kata-cc-nvidia-gpu';
 
-// Documented LUKS-in-TEE pattern: a raw-block PVC opened by an init container
-// with a Trustee-delivered passphrase. Shown as guidance — advanced/optional.
-const LUKS_EXAMPLE = `# 1) Raw-block PVC
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata: { name: enc-data }
-spec:
-  accessModes: [ReadWriteOnce]
-  volumeMode: Block
-  resources: { requests: { storage: 1Gi } }
----
-# 2) In the kata-cc pod/template spec:
-spec:
-  runtimeClassName: kata-cc
-  volumes:
-    - name: enc
-      persistentVolumeClaim: { claimName: enc-data }
-  initContainers:
-    - name: luks-open          # formats/opens the LUKS volume using a
-      image: <osc-storage-helper>   # passphrase sealed by Trustee (kbs:///...)
-      volumeDevices:
-        - { name: enc, devicePath: /dev/encblock }
-  containers:
-    - name: app
-      image: <your-image>
-      volumeDevices:
-        - { name: enc, devicePath: /dev/encblock }`;
+const CREATE_NS_SENTINEL = '__coco_create_namespace__';
+const IS_DEFAULT_SC_ANNOTATION = 'storageclass.kubernetes.io/is-default-class';
+/** Placeholder shown when no LUKS helper image is supplied — must be replaced by the user. */
+const LUKS_HELPER_PLACEHOLDER = '<luks-helper-image>';
 
 const CreateConfidentialWorkload: FC = () => {
   const { t } = useTranslation('plugin__coco-openshift-console-plugin');
@@ -77,12 +73,131 @@ const CreateConfidentialWorkload: FC = () => {
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
 
-  const valid = name.trim() !== '' && namespace.trim() !== '' && image.trim() !== '';
+  // --- Namespace typeahead (pick existing or type a brand-new name) ---
+  const [namespaces] = useK8sWatchResource<NamespaceKind[]>({
+    groupVersionKind: NamespaceGVK,
+    isList: true,
+  });
+  const nsNames = useMemo(
+    () =>
+      [
+        ...new Set((namespaces ?? []).map((n) => n.metadata?.name).filter(Boolean) as string[]),
+      ].sort((a, b) => a.localeCompare(b)),
+    [namespaces],
+  );
+  const [nsOpen, setNsOpen] = useState(false);
+  // What the user has typed into the combobox input (drives filtering + creatable option).
+  const [nsInput, setNsInput] = useState(namespace);
+  const nsToggleRef = useRef<MenuToggleElement>(null);
+  const nsTrimmed = namespace.trim();
+  const namespaceExists = nsNames.includes(nsTrimmed);
+  const nsFilter = nsInput.trim().toLowerCase();
+  const filteredNs = nsFilter ? nsNames.filter((n) => n.toLowerCase().includes(nsFilter)) : nsNames;
+  // Offer a creatable option when the typed text doesn't exactly match an existing namespace.
+  const nsTypedValue = nsInput.trim();
+  const showCreateNsOption = nsTypedValue !== '' && !nsNames.includes(nsTypedValue);
+
+  const selectNamespace = (value: string) => {
+    setNamespace(value);
+    setNsInput(value);
+    setNsOpen(false);
+    nsToggleRef.current?.focus();
+  };
+
+  // --- Encrypted block volume (LUKS) wizard ---
+  const [enc, setEnc] = useState(false);
+  const [pvcName, setPvcName] = useState('');
+  const [pvcSize, setPvcSize] = useState('1Gi');
+  const [storageClass, setStorageClass] = useState('');
+  const [devicePath, setDevicePath] = useState('/dev/encblock');
+  const [passphraseSource, setPassphraseSource] = useState('kbs:///default/luks/passphrase');
+  const [helperImage, setHelperImage] = useState('');
+  const [scOpen, setScOpen] = useState(false);
+  // True once the user edits the PVC name, so we stop auto-deriving it from the workload name.
+  const pvcNameTouched = useRef(false);
+  const scTouched = useRef(false);
+
+  const [storageClasses] = useK8sWatchResource<StorageClassKind[]>({
+    groupVersionKind: StorageClassGVK,
+    isList: true,
+  });
+  const scNames = useMemo(
+    () =>
+      ((storageClasses ?? []).map((s) => s.metadata?.name).filter(Boolean) as string[]).sort(
+        (a, b) => a.localeCompare(b),
+      ),
+    [storageClasses],
+  );
+  const defaultSc = useMemo(() => {
+    const flagged = (storageClasses ?? []).find(
+      (s) => s.metadata?.annotations?.[IS_DEFAULT_SC_ANNOTATION] === 'true',
+    );
+    return flagged?.metadata?.name ?? scNames[0] ?? '';
+  }, [storageClasses, scNames]);
+
+  // Default-select the cluster's default StorageClass once the list loads (unless the user chose one).
+  const effectiveSc = scTouched.current ? storageClass : storageClass || defaultSc;
+  // Default the PVC name from the workload name until the user overrides it.
+  const effectivePvcName = pvcNameTouched.current ? pvcName : pvcName || `${name.trim()}-enc`;
+
+  const valid =
+    name.trim() !== '' &&
+    nsTrimmed !== '' &&
+    image.trim() !== '' &&
+    (!enc || (effectivePvcName.trim() !== '' && pvcSize.trim() !== ''));
+
+  const buildPvc = (): K8sResourceCommon =>
+    ({
+      apiVersion: 'v1',
+      kind: 'PersistentVolumeClaim',
+      metadata: { name: effectivePvcName.trim(), namespace: nsTrimmed },
+      spec: {
+        accessModes: ['ReadWriteOnce'],
+        volumeMode: 'Block',
+        resources: { requests: { storage: pvcSize.trim() } },
+        ...(effectiveSc.trim() ? { storageClassName: effectiveSc.trim() } : {}),
+      },
+    }) as K8sResourceCommon;
 
   const buildManifest = (initdataValue: string): K8sResourceCommon => {
     const cmd = command.trim() ? command.trim().split(/\s+/) : undefined;
-    const container = { name: name.trim(), image: image.trim(), ...(cmd ? { command: cmd } : {}) };
+    // When an encrypted volume is requested, the main container mounts it as a raw
+    // block device and an init container opens (and on first use formats) the LUKS
+    // device using the passphrase before the app container starts.
+    const encVolumeDevices = enc
+      ? [{ name: 'enc-vol', devicePath: devicePath.trim() || '/dev/encblock' }]
+      : undefined;
+    const container = {
+      name: name.trim(),
+      image: image.trim(),
+      ...(cmd ? { command: cmd } : {}),
+      ...(encVolumeDevices ? { volumeDevices: encVolumeDevices } : {}),
+    };
     const annotations = initdataValue ? { [CC_INIT_DATA_ANNOTATION]: initdataValue } : undefined;
+
+    // luks-setup must open/format the LUKS device on /dev/encblock using the
+    // passphrase resolved from PASSPHRASE_SOURCE (a Trustee kbs:/// reference
+    // delivered after attestation, or a mounted Kubernetes Secret).
+    const initContainers = enc
+      ? [
+          {
+            name: 'luks-setup',
+            image: helperImage.trim() || LUKS_HELPER_PLACEHOLDER,
+            volumeDevices: encVolumeDevices,
+            env: [{ name: 'PASSPHRASE_SOURCE', value: passphraseSource.trim() }],
+          },
+        ]
+      : undefined;
+    const volumes = enc
+      ? [{ name: 'enc-vol', persistentVolumeClaim: { claimName: effectivePvcName.trim() } }]
+      : undefined;
+
+    const podSpec = {
+      runtimeClassName: runtimeClass,
+      containers: [container],
+      ...(initContainers ? { initContainers } : {}),
+      ...(volumes ? { volumes } : {}),
+    };
 
     if (kind === 'Pod') {
       return {
@@ -90,23 +205,23 @@ const CreateConfidentialWorkload: FC = () => {
         kind: 'Pod',
         metadata: {
           name: name.trim(),
-          namespace: namespace.trim(),
+          namespace: nsTrimmed,
           labels: { app: name.trim() },
           ...(annotations ? { annotations } : {}),
         },
-        spec: { runtimeClassName: runtimeClass, containers: [container] },
+        spec: podSpec,
       } as K8sResourceCommon;
     }
     return {
       apiVersion: 'apps/v1',
       kind: 'Deployment',
-      metadata: { name: name.trim(), namespace: namespace.trim() },
+      metadata: { name: name.trim(), namespace: nsTrimmed },
       spec: {
         replicas: Number(replicas) || 1,
         selector: { matchLabels: { app: name.trim() } },
         template: {
           metadata: { labels: { app: name.trim() }, ...(annotations ? { annotations } : {}) },
-          spec: { runtimeClassName: runtimeClass, containers: [container] },
+          spec: podSpec,
         },
       },
     } as K8sResourceCommon;
@@ -117,12 +232,32 @@ const CreateConfidentialWorkload: FC = () => {
     trimmedInitdata.length > 80
       ? `${trimmedInitdata.slice(0, 80)}… (${trimmedInitdata.length} chars)`
       : trimmedInitdata;
-  const preview = JSON.stringify(buildManifest(previewInitdata), null, 2);
+  const workloadPreview = JSON.stringify(buildManifest(previewInitdata), null, 2);
+  // Show the PVC manifest above the workload so the user sees everything that gets created.
+  const preview = enc
+    ? `${JSON.stringify(buildPvc(), null, 2)}\n---\n${workloadPreview}`
+    : workloadPreview;
 
   const create = async () => {
     setBusy(true);
     setError(undefined);
     try {
+      // 1) Create the namespace first if the chosen one doesn't already exist.
+      if (!namespaceExists) {
+        await k8sCreate({
+          model: NamespaceModel,
+          data: {
+            apiVersion: 'v1',
+            kind: 'Namespace',
+            metadata: { name: nsTrimmed },
+          } as K8sResourceCommon,
+        });
+      }
+      // 2) Create the encrypted PVC before the workload that consumes it.
+      if (enc) {
+        await k8sCreate({ model: PersistentVolumeClaimModel, data: buildPvc() });
+      }
+      // 3) Create the workload.
       await k8sCreate({
         model: kind === 'Pod' ? PodModel : DeploymentModel,
         data: buildManifest(trimmedInitdata),
@@ -168,13 +303,79 @@ const CreateConfidentialWorkload: FC = () => {
                     />
                   </FormGroup>
                   <FormGroup label={t('Namespace')} isRequired fieldId="cw-namespace">
-                    <TextInput
-                      id="cw-namespace"
-                      value={namespace}
-                      onChange={(_e, v) => {
-                        setNamespace(v);
+                    <Select
+                      isOpen={nsOpen}
+                      selected={namespaceExists ? nsTrimmed : undefined}
+                      onSelect={(_e, value) => {
+                        if (value === CREATE_NS_SENTINEL) {
+                          selectNamespace(nsTypedValue);
+                        } else if (typeof value === 'string') {
+                          selectNamespace(value);
+                        }
                       }}
-                    />
+                      onOpenChange={(isOpen) => {
+                        setNsOpen(isOpen);
+                      }}
+                      toggle={(toggleRef: Ref<MenuToggleElement>) => (
+                        <MenuToggle
+                          variant="typeahead"
+                          aria-label={t('Namespace')}
+                          ref={toggleRef}
+                          isExpanded={nsOpen}
+                          isFullWidth
+                          onClick={() => {
+                            setNsOpen(!nsOpen);
+                          }}
+                        >
+                          <TextInputGroup isPlain>
+                            <TextInputGroupMain
+                              id="cw-namespace"
+                              value={nsInput}
+                              innerRef={nsToggleRef}
+                              placeholder={t('Select or enter a namespace')}
+                              role="combobox"
+                              isExpanded={nsOpen}
+                              aria-controls="cw-namespace-listbox"
+                              onClick={() => {
+                                setNsOpen(!nsOpen);
+                              }}
+                              onChange={(_e, v) => {
+                                setNsInput(v);
+                                setNamespace(v);
+                                if (!nsOpen) setNsOpen(true);
+                              }}
+                            />
+                          </TextInputGroup>
+                        </MenuToggle>
+                      )}
+                    >
+                      <SelectList id="cw-namespace-listbox">
+                        {filteredNs.map((ns) => (
+                          <SelectOption key={ns} value={ns}>
+                            {ns}
+                          </SelectOption>
+                        ))}
+                        {showCreateNsOption && (
+                          <SelectOption key="__create__" value={CREATE_NS_SENTINEL}>
+                            {t('Create new namespace: {{name}}', { name: nsTypedValue })}
+                          </SelectOption>
+                        )}
+                        {filteredNs.length === 0 && !showCreateNsOption && (
+                          <SelectOption isDisabled value="__none__">
+                            {t('No namespaces found')}
+                          </SelectOption>
+                        )}
+                      </SelectList>
+                    </Select>
+                    {nsTrimmed !== '' && !namespaceExists && (
+                      <HelperText>
+                        <HelperTextItem variant="warning">
+                          {t('Namespace {{name}} does not exist yet and will be created.', {
+                            name: nsTrimmed,
+                          })}
+                        </HelperTextItem>
+                      </HelperText>
+                    )}
                   </FormGroup>
                   <FormGroup label={t('Image')} isRequired fieldId="cw-image">
                     <TextInput
@@ -211,7 +412,9 @@ const CreateConfidentialWorkload: FC = () => {
                       </p>
                       <ul className="coco-openshift-console-plugin__mb">
                         <li>
-                          {t('An IOMMU MachineConfig (intel_iommu=on / amd_iommu=on) — reboots nodes.')}
+                          {t(
+                            'An IOMMU MachineConfig (intel_iommu=on / amd_iommu=on) — reboots nodes.',
+                          )}
                         </li>
                         <li>
                           {t(
@@ -274,18 +477,125 @@ const CreateConfidentialWorkload: FC = () => {
                     </p>
                   </FormGroup>
 
-                  <ExpandableSection
-                    toggleText={t('Encrypted block volume (LUKS) — advanced')}
-                  >
-                    <p className="coco-openshift-console-plugin__muted coco-openshift-console-plugin__mb">
-                      {t(
-                        'For data-at-use encryption inside the TEE, attach a raw-block volume and open it with LUKS from an init container, using a passphrase that Trustee delivers only after attestation. Add to the pod spec:',
+                  <FormGroup fieldId="cw-enc">
+                    <Checkbox
+                      id="cw-enc"
+                      label={t('Add an encrypted block volume (LUKS)')}
+                      description={t(
+                        'Attach a raw-block PVC that an init container opens with LUKS inside the TEE, using a passphrase Trustee delivers only after attestation.',
                       )}
-                    </p>
-                    <CodeBlock>
-                      <CodeBlockCode>{LUKS_EXAMPLE}</CodeBlockCode>
-                    </CodeBlock>
-                  </ExpandableSection>
+                      isChecked={enc}
+                      onChange={(_e, checked) => {
+                        setEnc(checked);
+                      }}
+                    />
+                  </FormGroup>
+                  {enc && (
+                    <>
+                      <FormGroup label={t('PVC name')} isRequired fieldId="cw-pvc-name">
+                        <TextInput
+                          id="cw-pvc-name"
+                          value={effectivePvcName}
+                          onChange={(_e, v) => {
+                            pvcNameTouched.current = true;
+                            setPvcName(v);
+                          }}
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('Size')} isRequired fieldId="cw-pvc-size">
+                        <TextInput
+                          id="cw-pvc-size"
+                          value={pvcSize}
+                          onChange={(_e, v) => {
+                            setPvcSize(v);
+                          }}
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('Storage class')} fieldId="cw-pvc-sc">
+                        <Select
+                          isOpen={scOpen}
+                          selected={effectiveSc}
+                          onSelect={(_e, value) => {
+                            scTouched.current = true;
+                            setStorageClass(typeof value === 'string' ? value : '');
+                            setScOpen(false);
+                          }}
+                          onOpenChange={(isOpen) => {
+                            setScOpen(isOpen);
+                          }}
+                          toggle={(toggleRef: Ref<MenuToggleElement>) => (
+                            <MenuToggle
+                              id="cw-pvc-sc"
+                              ref={toggleRef}
+                              isExpanded={scOpen}
+                              isFullWidth
+                              onClick={() => {
+                                setScOpen(!scOpen);
+                              }}
+                            >
+                              {effectiveSc || t('Use cluster default')}
+                            </MenuToggle>
+                          )}
+                        >
+                          <SelectList>
+                            {scNames.length === 0 ? (
+                              <SelectOption isDisabled value="__none__">
+                                {t('No storage classes found')}
+                              </SelectOption>
+                            ) : (
+                              scNames.map((sc) => (
+                                <SelectOption key={sc} value={sc}>
+                                  {sc === defaultSc ? t('{{name}} (default)', { name: sc }) : sc}
+                                </SelectOption>
+                              ))
+                            )}
+                          </SelectList>
+                        </Select>
+                      </FormGroup>
+                      <FormGroup label={t('Device path')} fieldId="cw-device-path">
+                        <TextInput
+                          id="cw-device-path"
+                          value={devicePath}
+                          onChange={(_e, v) => {
+                            setDevicePath(v);
+                          }}
+                        />
+                      </FormGroup>
+                      <FormGroup label={t('Passphrase source')} fieldId="cw-passphrase">
+                        <TextInput
+                          id="cw-passphrase"
+                          value={passphraseSource}
+                          onChange={(_e, v) => {
+                            setPassphraseSource(v);
+                          }}
+                        />
+                        <HelperText>
+                          <HelperTextItem>
+                            {t(
+                              'A Trustee-delivered passphrase reference like kbs:///default/luks/passphrase, or a Kubernetes Secret name.',
+                            )}
+                          </HelperTextItem>
+                        </HelperText>
+                      </FormGroup>
+                      <FormGroup label={t('LUKS helper image')} fieldId="cw-helper-image">
+                        <TextInput
+                          id="cw-helper-image"
+                          value={helperImage}
+                          placeholder={LUKS_HELPER_PLACEHOLDER}
+                          onChange={(_e, v) => {
+                            setHelperImage(v);
+                          }}
+                        />
+                        <HelperText>
+                          <HelperTextItem>
+                            {t(
+                              'Image whose init container opens the LUKS device with the passphrase on boot — see the OpenShift sandboxed containers LUKS-in-TEE docs.',
+                            )}
+                          </HelperTextItem>
+                        </HelperText>
+                      </FormGroup>
+                    </>
+                  )}
 
                   {error && (
                     <Alert variant="danger" isInline title={t('Could not create workload')}>

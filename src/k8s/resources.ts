@@ -112,8 +112,37 @@ export const SecretGVK: K8sGroupVersionKind = { version: 'v1', kind: 'Secret' };
 export const EventGVK: K8sGroupVersionKind = { version: 'v1', kind: 'Event' };
 export const NodeGVK: K8sGroupVersionKind = { version: 'v1', kind: 'Node' };
 export const NamespaceGVK: K8sGroupVersionKind = { version: 'v1', kind: 'Namespace' };
+export const PersistentVolumeClaimGVK: K8sGroupVersionKind = {
+  version: 'v1',
+  kind: 'PersistentVolumeClaim',
+};
+export const StorageClassGVK: K8sGroupVersionKind = {
+  group: 'storage.k8s.io',
+  version: 'v1',
+  kind: 'StorageClass',
+};
 
 /** Minimal K8sModels for create/delete via k8sCreate / k8sDelete. */
+export const NamespaceModel: K8sModel = {
+  apiVersion: 'v1',
+  kind: 'Namespace',
+  plural: 'namespaces',
+  namespaced: false,
+  abbr: 'NS',
+  label: 'Namespace',
+  labelPlural: 'Namespaces',
+};
+
+export const PersistentVolumeClaimModel: K8sModel = {
+  apiVersion: 'v1',
+  kind: 'PersistentVolumeClaim',
+  plural: 'persistentvolumeclaims',
+  namespaced: true,
+  abbr: 'PVC',
+  label: 'PersistentVolumeClaim',
+  labelPlural: 'PersistentVolumeClaims',
+};
+
 export const PodModel: K8sModel = {
   apiVersion: 'v1',
   kind: 'Pod',

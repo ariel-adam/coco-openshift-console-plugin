@@ -39,20 +39,29 @@ import { kataInstallSummary, statusCategory } from '../utils/status';
 import { teeLabel } from '../utils/tee';
 import './coco.css';
 
-const StatTile: FC<{ value: number | string; label: string; loading?: boolean }> = ({
-  value,
-  label,
-  loading,
-}) => (
-  <Card isCompact className="coco-openshift-console-plugin__stat">
-    <CardBody>
-      <div className="coco-openshift-console-plugin__stat-value">
-        {loading ? <Skeleton width="3rem" height="1.5rem" /> : value}
-      </div>
-      <div className="coco-openshift-console-plugin__stat-label">{label}</div>
-    </CardBody>
-  </Card>
-);
+const StatTile: FC<{
+  value: number | string;
+  label: string;
+  loading?: boolean;
+  href?: string;
+}> = ({ value, label, loading, href }) => {
+  const card = (
+    <Card
+      isCompact
+      className={`coco-openshift-console-plugin__stat${
+        href ? ' coco-openshift-console-plugin__stat--clickable' : ''
+      }`}
+    >
+      <CardBody>
+        <div className="coco-openshift-console-plugin__stat-value">
+          {loading ? <Skeleton width="3rem" height="1.5rem" /> : value}
+        </div>
+        <div className="coco-openshift-console-plugin__stat-label">{label}</div>
+      </CardBody>
+    </Card>
+  );
+  return href ? <Link to={href}>{card}</Link> : card;
+};
 
 const HealthBar: FC<{ healthy: number; warning: number; error: number }> = ({
   healthy,
@@ -174,16 +183,31 @@ const ConfidentialContainersOverview: FC = () => {
               value={workloads.length}
               label={t('Confidential workloads')}
               loading={wlLoading}
+              href="/confidential-containers/workloads"
             />
           </GridItem>
           <GridItem span={2}>
-            <StatTile value={teeNodes.length} label={t('TEE-capable nodes')} loading={!kcLoaded} />
+            <StatTile
+              value={teeNodes.length}
+              label={t('TEE-capable nodes')}
+              loading={!kcLoaded}
+              href="/confidential-containers/tee-nodes"
+            />
           </GridItem>
           <GridItem span={3}>
-            <StatTile value={confidentialRCs.length} label={t('Confidential runtime classes')} />
+            <StatTile
+              value={confidentialRCs.length}
+              label={t('Confidential runtime classes')}
+              href="/confidential-containers/runtime-classes"
+            />
           </GridItem>
           <GridItem span={2}>
-            <StatTile value={kata.ready} label={t('Kata nodes ready')} loading={!kcLoaded} />
+            <StatTile
+              value={kata.ready}
+              label={t('Kata nodes ready')}
+              loading={!kcLoaded}
+              href="/confidential-containers/tee-nodes"
+            />
           </GridItem>
           <GridItem span={6}>
             <Card>
@@ -348,7 +372,6 @@ const ConfidentialContainersOverview: FC = () => {
               </CardBody>
             </Card>
           </GridItem>
-
         </Grid>
       </PageSection>
     </>

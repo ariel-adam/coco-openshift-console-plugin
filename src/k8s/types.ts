@@ -47,6 +47,14 @@ export type KataConfigKind = K8sResourceCommon & {
   };
 };
 
+/** A v1 Namespace — we only need name (metadata) for the namespace selector. */
+export type NamespaceKind = K8sResourceCommon;
+
+/** A storage.k8s.io/v1 StorageClass — we read the is-default-class annotation. */
+export type StorageClassKind = K8sResourceCommon & {
+  metadata?: K8sResourceCommon['metadata'] & { annotations?: Record<string, string> };
+};
+
 /** A v1 Node — we read labels (TEE/GPU-CC) and Ready condition. */
 export type NodeKind = K8sResourceCommon & {
   status?: {

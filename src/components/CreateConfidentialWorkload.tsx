@@ -105,9 +105,9 @@ const SIDECAR_SCRIPT = [
   'CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt',
   'while true; do',
   '  TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"',
-  '  if curl -sf -m 10 "http://127.0.0.1:8006/cdh/resource/${CDH_PATH}" -o /tmp/resp 2>/tmp/cerr; then PRC=0; else PRC=$?; fi',
-  '  if [ "$PRC" -eq 0 ]; then VERDICT=passed; elif [ "$PRC" -eq 22 ]; then VERDICT=failed; else VERDICT=inconclusive; fi',
-  '  printf \'{"schema":"trustee.attestation.evidence/v1","source":"sidecar","timestamp":"%s","workload":{"namespace":"%s","name":"%s","uid":"%s","node":"%s","runtimeClassName":"%s","hasInitData":%s},"trustee":{"kbsEndpoint":"%s"},"probe":{"method":"in-guest sidecar CDH resource fetch","cdhPath":"%s","execExitCode":%s},"verdict":"%s"}\' "$TS" "$POD_NS" "$POD_NAME" "$POD_UID" "$NODE_NAME" "$RUNTIME" "$HAS_INITDATA" "$KBS_ENDPOINT" "$CDH_PATH" "$PRC" "$VERDICT" > /tmp/ev.json',
+  '  HTTP="$(curl -s -m 10 -o /tmp/resp -w \'%{http_code}\' "http://127.0.0.1:8006/cdh/resource/${CDH_PATH}" 2>/tmp/cerr)"; PRC=$?',
+  '  if [ "$PRC" -ne 0 ]; then VERDICT=inconclusive; HTTP=000; elif [ "$HTTP" -ge 200 ] && [ "$HTTP" -lt 300 ]; then VERDICT=passed; else VERDICT=failed; fi',
+  '  printf \'{"schema":"trustee.attestation.evidence/v1","source":"sidecar","timestamp":"%s","workload":{"namespace":"%s","name":"%s","uid":"%s","node":"%s","runtimeClassName":"%s","hasInitData":%s},"trustee":{"kbsEndpoint":"%s"},"probe":{"method":"in-guest sidecar CDH resource fetch","cdhPath":"%s","httpStatus":"%s","execExitCode":%s},"verdict":"%s"}\' "$TS" "$POD_NS" "$POD_NAME" "$POD_UID" "$NODE_NAME" "$RUNTIME" "$HAS_INITDATA" "$KBS_ENDPOINT" "$CDH_PATH" "$HTTP" "$PRC" "$VERDICT" > /tmp/ev.json',
   '  ESC="$(sed -e \'s/\\\\/\\\\\\\\/g\' -e \'s/"/\\\\"/g\' /tmp/ev.json | tr -d \'\\n\')"',
   '  printf \'{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"%s","labels":{"trustee.attestation/evidence":"true","trustee.attestation/pod":"%s"}},"data":{"evidence.json":"%s"}}\' "$CM_NAME" "$POD_NAME" "$ESC" > /tmp/cm.json',
   '  curl -sS --cacert "$CACERT" -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/apply-patch+yaml" -X PATCH "${API}/api/v1/namespaces/${POD_NS}/configmaps/${CM_NAME}?fieldManager=attestation-evidence-sidecar&force=true" --data-binary @/tmp/cm.json >/tmp/apply.out 2>/tmp/apply.err || true',
@@ -184,7 +184,7 @@ const CreateConfidentialWorkload: FC = () => {
 
   // --- Attestation evidence sidecar (self-reporting, no exec) ---
   const [evidenceSidecar, setEvidenceSidecar] = useState(false);
-  const [evidenceCdhPath, setEvidenceCdhPath] = useState('default/kbsres1');
+  const [evidenceCdhPath, setEvidenceCdhPath] = useState('default/kbsres1/key1');
   const [evidenceInterval, setEvidenceInterval] = useState('60');
 
   const [storageClasses] = useK8sWatchResource<StorageClassKind[]>({
@@ -323,7 +323,7 @@ const CreateConfidentialWorkload: FC = () => {
             { name: 'NODE_NAME', valueFrom: { fieldRef: { fieldPath: 'spec.nodeName' } } },
             { name: 'RUNTIME', value: runtimeClass },
             { name: 'HAS_INITDATA', value: initdataValue ? 'true' : 'false' },
-            { name: 'CDH_PATH', value: evidenceCdhPath.trim() || 'default/kbsres1' },
+            { name: 'CDH_PATH', value: evidenceCdhPath.trim() || 'default/kbsres1/key1' },
             { name: 'INTERVAL', value: evidenceInterval.trim() || '60' },
             { name: 'CM_NAME', value: evidenceCmName(podName) },
             { name: 'KBS_ENDPOINT', value: kbsEndpoint },
@@ -817,7 +817,7 @@ const CreateConfidentialWorkload: FC = () => {
                         <HelperText>
                           <HelperTextItem>
                             {t(
-                              'A KBS resource the guest fetches; it only releases after a successful attestation',
+                              'A KBS resource the guest fetches as proof it attested — released only after a successful attestation. Use the full path <repository>/<name>/<key>, e.g. default/kbsres1/key1. A two-segment path like default/kbsres1 is a folder, not a resource, and returns 404.',
                             )}
                           </HelperTextItem>
                         </HelperText>

@@ -41,8 +41,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom-v5-compat';
 import { useTranslation } from 'react-i18next';
 import {
   CC_INIT_DATA_ANNOTATION,
-  COCO_TOOLS_IMAGE,
   DeploymentModel,
+  EVIDENCE_SIDECAR_IMAGE,
   NamespaceGVK,
   NamespaceModel,
   PersistentVolumeClaimModel,
@@ -84,92 +84,33 @@ const evidenceRbacName = (podName: string): string =>
   `${sanitizeName(podName)}-att-evidence`.slice(0, 253).replace(/-+$/g, '');
 
 /**
- * Script run by the attestation-evidence sidecar. Built as single-quoted lines so
- * every bash `${VAR}` stays literal — all user-supplied values arrive via the
- * container env (POD_NAME, POD_NS, CDH_PATH, INTERVAL, CM_NAME, KBS_ENDPOINT, …),
- * never via JS string interpolation. Each loop iteration:
- *   1. fetches the pod object (best-effort) for the workload facts,
- *   2. probes the Confidential Data Hub for a KBS resource (releases only after a
+ * Script run by the attestation-evidence sidecar. Tiny on purpose: it runs in a
+ * ubi-minimal image (curl + bash + sed + coreutils) so it fits inside the
+ * confidential kata-cc guest VM — the old coco-tools image (oc + python3) could
+ * not unpack there ("No space left on device"). Built as single-quoted lines so
+ * every bash `${VAR}` stays literal; all user-supplied values arrive via the
+ * container env (POD_NAME, POD_NS, POD_UID, NODE_NAME, RUNTIME, HAS_INITDATA,
+ * CDH_PATH, INTERVAL, CM_NAME, KBS_ENDPOINT), never via JS string interpolation.
+ * Each loop iteration:
+ *   1. probes the Confidential Data Hub for a KBS resource (released only after a
  *      successful in-guest attestation) and maps the curl exit code to a verdict,
- *   3. renders the trustee.attestation.evidence/v1 document with python3, and
- *   4. publishes/labels the evidence ConfigMap the Trustee plugin reads.
+ *   2. renders the trustee.attestation.evidence/v1 document with printf, and
+ *   3. PATCHes (server-side apply) the evidence ConfigMap the Trustee plugin
+ *      reads straight to the Kubernetes API with curl — no oc, no python.
  */
 const SIDECAR_SCRIPT = [
   'set -u',
-  'export HOME="${HOME:-/tmp}"',
-  'echo "attestation-evidence sidecar starting for ${POD_NS}/${POD_NAME}"',
+  'API="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}"',
+  'TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"',
+  'CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt',
   'while true; do',
-  '  TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)',
-  '  oc get pod "${POD_NAME}" -n "${POD_NS}" -o json > /tmp/pod.json 2>/tmp/poderr || true',
-  '  curl -sf -m 10 "http://127.0.0.1:8006/cdh/resource/${CDH_PATH}" > /tmp/resp 2>/tmp/cerr; PRC=$?',
-  '  if [ "${PRC}" -eq 0 ]; then VERDICT=passed; elif [ "${PRC}" -eq 22 ]; then VERDICT=failed; else VERDICT=inconclusive; fi',
-  '  PRC="${PRC}" VERDICT="${VERDICT}" TS="${TS}" python3 - <<\'PYEOF\' > /tmp/evidence.json',
-  'import os, json, hashlib',
-  '',
-  '',
-  'def read(path, limit):',
-  '    try:',
-  '        with open(path) as f:',
-  '            return f.read()[:limit]',
-  '    except OSError:',
-  '        return ""',
-  '',
-  '',
-  'pod = {}',
-  'try:',
-  '    with open("/tmp/pod.json") as f:',
-  '        pod = json.load(f)',
-  'except (OSError, ValueError):',
-  '    pod = {}',
-  '',
-  'meta = pod.get("metadata", {}) or {}',
-  'spec = pod.get("spec", {}) or {}',
-  'status = pod.get("status", {}) or {}',
-  'annotations = meta.get("annotations", {}) or {}',
-  '',
-  'initdata = annotations.get("io.katacontainers.config.hypervisor.cc_init_data")',
-  'initdata_sha = (',
-  '    hashlib.sha256(initdata.encode("utf-8")).hexdigest() if initdata else None',
-  ')',
-  '',
-  'kbs = os.environ.get("KBS_ENDPOINT") or None',
-  'cluster = os.environ.get("CLUSTER_NAME") or None',
-  'resp = read("/tmp/resp", 4000)',
-  'cerr = read("/tmp/cerr", 1000)',
-  'verdict = os.environ.get("VERDICT", "inconclusive")',
-  'try:',
-  '    prc = int(os.environ.get("PRC", "-1"))',
-  'except ValueError:',
-  '    prc = -1',
-  '',
-  'evidence = {',
-  '    "schema": "trustee.attestation.evidence/v1",',
-  '    "source": "sidecar",',
-  '    "timestamp": os.environ.get("TS"),',
-  '    "cluster": cluster,',
-  '    "workload": {',
-  '        "namespace": meta.get("namespace") or os.environ.get("POD_NS"),',
-  '        "name": meta.get("name") or os.environ.get("POD_NAME"),',
-  '        "uid": meta.get("uid") or os.environ.get("POD_UID") or None,',
-  '        "node": spec.get("nodeName") or os.environ.get("NODE_NAME") or None,',
-  '        "runtimeClassName": spec.get("runtimeClassName"),',
-  '        "phase": status.get("phase"),',
-  '        "hasInitData": initdata is not None,',
-  '        "initdataSha256": initdata_sha,',
-  '    },',
-  '    "trustee": {"kbsEndpoint": kbs},',
-  '    "probe": {',
-  '        "method": "in-guest sidecar CDH resource fetch",',
-  '        "cdhPath": os.environ.get("CDH_PATH"),',
-  '        "execExitCode": prc,',
-  '        "response": resp,',
-  '        "error": cerr,',
-  '    },',
-  '    "verdict": verdict,',
-  '}',
-  'print(json.dumps(evidence, indent=2))',
-  'PYEOF',
-  '  oc create configmap "${CM_NAME}" -n "${POD_NS}" --from-file=evidence.json=/tmp/evidence.json --dry-run=client -o yaml | oc label --local -f - trustee.attestation/evidence=true "trustee.attestation/pod=${POD_NAME}" -o yaml | oc apply -f -',
+  '  TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"',
+  '  if curl -sf -m 10 "http://127.0.0.1:8006/cdh/resource/${CDH_PATH}" -o /tmp/resp 2>/tmp/cerr; then PRC=0; else PRC=$?; fi',
+  '  if [ "$PRC" -eq 0 ]; then VERDICT=passed; elif [ "$PRC" -eq 22 ]; then VERDICT=failed; else VERDICT=inconclusive; fi',
+  '  printf \'{"schema":"trustee.attestation.evidence/v1","source":"sidecar","timestamp":"%s","workload":{"namespace":"%s","name":"%s","uid":"%s","node":"%s","runtimeClassName":"%s","hasInitData":%s},"trustee":{"kbsEndpoint":"%s"},"probe":{"method":"in-guest sidecar CDH resource fetch","cdhPath":"%s","execExitCode":%s},"verdict":"%s"}\' "$TS" "$POD_NS" "$POD_NAME" "$POD_UID" "$NODE_NAME" "$RUNTIME" "$HAS_INITDATA" "$KBS_ENDPOINT" "$CDH_PATH" "$PRC" "$VERDICT" > /tmp/ev.json',
+  '  ESC="$(sed -e \'s/\\\\/\\\\\\\\/g\' -e \'s/"/\\\\"/g\' /tmp/ev.json | tr -d \'\\n\')"',
+  '  printf \'{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"%s","labels":{"trustee.attestation/evidence":"true","trustee.attestation/pod":"%s"}},"data":{"evidence.json":"%s"}}\' "$CM_NAME" "$POD_NAME" "$ESC" > /tmp/cm.json',
+  '  curl -sS --cacert "$CACERT" -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/apply-patch+yaml" -X PATCH "${API}/api/v1/namespaces/${POD_NS}/configmaps/${CM_NAME}?fieldManager=attestation-evidence-sidecar&force=true" --data-binary @/tmp/cm.json >/tmp/apply.out 2>/tmp/apply.err || true',
   '  sleep "${INTERVAL}"',
   'done',
 ].join('\n');
@@ -367,14 +308,19 @@ const CreateConfidentialWorkload: FC = () => {
     const evidenceContainer = evidenceSidecar
       ? {
           name: 'attestation-evidence',
-          image: COCO_TOOLS_IMAGE,
+          image: EVIDENCE_SIDECAR_IMAGE,
           command: ['bash', '-c', SIDECAR_SCRIPT],
+          resources: {
+            requests: { cpu: '10m', memory: '32Mi' },
+            limits: { cpu: '50m', memory: '64Mi' },
+          },
           env: [
-            { name: 'HOME', value: '/tmp' },
             { name: 'POD_NAME', valueFrom: { fieldRef: { fieldPath: 'metadata.name' } } },
             { name: 'POD_NS', valueFrom: { fieldRef: { fieldPath: 'metadata.namespace' } } },
             { name: 'POD_UID', valueFrom: { fieldRef: { fieldPath: 'metadata.uid' } } },
             { name: 'NODE_NAME', valueFrom: { fieldRef: { fieldPath: 'spec.nodeName' } } },
+            { name: 'RUNTIME', value: runtimeClass },
+            { name: 'HAS_INITDATA', value: initdataValue ? 'true' : 'false' },
             { name: 'CDH_PATH', value: evidenceCdhPath.trim() || 'default/kbsres1' },
             { name: 'INTERVAL', value: evidenceInterval.trim() || '60' },
             { name: 'CM_NAME', value: evidenceCmName(podName) },
@@ -870,6 +816,11 @@ const CreateConfidentialWorkload: FC = () => {
                         <p className="coco-openshift-console-plugin__mb">
                           {t(
                             'The sidecar runs inside the TEE as a declared container — not via oc exec, which secure confidential workloads forbid. It proves attestation by fetching a KBS resource through the Confidential Data Hub (the resource is only released after a successful attestation) and pushes a timestamped evidence record to a ConfigMap.',
+                          )}
+                        </p>
+                        <p className="coco-openshift-console-plugin__mb">
+                          {t(
+                            'It uses a tiny ubi-minimal image and pushes the evidence to the Kubernetes API with curl (no oc, no python), so it fits inside the confidential guest VM.',
                           )}
                         </p>
                         <p>

@@ -128,6 +128,7 @@
   "Installing the kata-cc runtime reconfigures and reboots the sandboxed-containers nodes, one at a time.": "Installing the kata-cc runtime reconfigures and reboots the sandboxed-containers nodes, one at a time.",
   "Installing the runtime reconfigures and reboots the eligible nodes, one at a time. checkNodeEligibility limits installation to nodes labeled TEE-capable.": "Installing the runtime reconfigures and reboots the eligible nodes, one at a time. checkNodeEligibility limits installation to nodes labeled TEE-capable.",
   "Intel TDX must be activated in the host kernel before Node Feature Discovery can detect it. This adds the required kernel arguments to the selected MachineConfigPool. Use it when a node has TDX enabled in firmware but is not detected as TEE-capable.": "Intel TDX must be activated in the host kernel before Node Feature Discovery can detect it. This adds the required kernel arguments to the selected MachineConfigPool. Use it when a node has TDX enabled in firmware but is not detected as TEE-capable.",
+  "It uses a tiny ubi-minimal image and pushes the evidence to the Kubernetes API with curl (no oc, no python), so it fits inside the confidential guest VM.": "It uses a tiny ubi-minimal image and pushes the evidence to the Kubernetes API with curl (no oc, no python), so it fits inside the confidential guest VM.",
   "Kata Agent policy": "Kata Agent policy",
   "Kata nodes ready": "Kata nodes ready",
   "kata-cc runtime": "kata-cc runtime",

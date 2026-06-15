@@ -224,11 +224,21 @@ export const KATACONFIG_NAME = 'example-kataconfig';
 export const CC_INIT_DATA_ANNOTATION = 'io.katacontainers.config.hypervisor.cc_init_data';
 
 /**
- * coco-tools image — ships bash, oc, curl, and python3, used by the in-guest
- * attestation evidence sidecar to fetch a CDH/KBS resource and publish the
- * evidence ConfigMap the Trustee plugin reads.
+ * coco-tools image — ships bash, oc, curl, and python3. Kept for tooling that
+ * needs the full client set; NOT used by the attestation evidence sidecar (it is
+ * too large to unpack inside a confidential kata-cc guest VM — see
+ * EVIDENCE_SIDECAR_IMAGE).
  */
 export const COCO_TOOLS_IMAGE = 'quay.io/openshift_sandboxed_containers/coco-tools:1.12';
+
+/**
+ * Tiny image for the in-guest attestation evidence sidecar. ubi-minimal ships
+ * curl + bash + sed + coreutils (~40MB), which fits inside the confidential
+ * kata-cc guest VM; the heavier COCO_TOOLS_IMAGE (oc + python3) cannot unpack
+ * there and fails with "No space left on device". The sidecar pushes the
+ * evidence ConfigMap straight to the Kubernetes API with curl — no oc, no python.
+ */
+export const EVIDENCE_SIDECAR_IMAGE = 'registry.access.redhat.com/ubi9/ubi-minimal:latest';
 
 // `kind~group~version` reference string for action/flag extensions.
 export const KataConfigModelRef = 'kataconfiguration.openshift.io~v1~KataConfig';

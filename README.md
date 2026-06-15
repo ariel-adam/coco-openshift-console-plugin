@@ -42,6 +42,26 @@ A single **Confidential Containers** admin nav section (gated by `console.flag/m
   policy), emit the gzip+base64 pod annotation `io.katacontainers.config.hypervisor.cc_init_data`, and
   the PCR8 reference value to register in Trustee's RVPS.
 
+## Screenshots
+
+### Overview
+![Confidential containers overview](docs/images/05_coco_overview.png)
+
+### Setup
+![Confidential containers setup](docs/images/06_coco_setup.png)
+
+### Workloads
+![Confidential workloads](docs/images/07_coco_workloads.png)
+
+### Runtime classes
+![Confidential runtime classes](docs/images/08_coco_runtimeclasses.png)
+
+### Initdata builder
+![Initdata builder](docs/images/09_coco_initdata.png)
+
+### Create confidential workload
+![Create confidential workload](docs/images/10_coco_create.png)
+
 ## Stack
 
 Matches `osc-openshift-console-plugin` (OCP **4.21**): React 17, PatternFly 6.2,

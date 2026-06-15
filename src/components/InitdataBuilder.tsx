@@ -7,9 +7,6 @@ import {
   CardTitle,
   Checkbox,
   ClipboardCopy,
-  CodeBlock,
-  CodeBlockCode,
-  ExpandableSection,
   Form,
   FormGroup,
   FormSelect,
@@ -212,22 +209,37 @@ const InitdataBuilder: FC = () => {
                         {result.pcr8}
                       </ClipboardCopy>
                     </FormGroup>
-                    <ExpandableSection
-                      toggleText={t('Pod manifest snippet')}
+                    <FormGroup
+                      label={t('Pod manifest snippet')}
+                      fieldId="pod-snippet"
                       className="coco-openshift-console-plugin__mt"
                     >
-                      <CodeBlock>
-                        <CodeBlockCode>{podSnippet}</CodeBlockCode>
-                      </CodeBlock>
-                    </ExpandableSection>
-                    <ExpandableSection
-                      toggleText={t('Generated initdata.toml')}
+                      <ClipboardCopy
+                        isCode
+                        isReadOnly
+                        variant="expansion"
+                        hoverTip={t('Copy')}
+                        clickTip={t('Copied')}
+                      >
+                        {podSnippet}
+                      </ClipboardCopy>
+                    </FormGroup>
+                    <FormGroup
+                      label={t('Generated initdata.toml')}
+                      fieldId="initdata-toml"
                       className="coco-openshift-console-plugin__mt"
                     >
-                      <CodeBlock>
-                        <CodeBlockCode>{result.toml}</CodeBlockCode>
-                      </CodeBlock>
-                    </ExpandableSection>
+                      <ClipboardCopy
+                        isCode
+                        isReadOnly
+                        isExpanded
+                        variant="expansion"
+                        hoverTip={t('Copy')}
+                        clickTip={t('Copied')}
+                      >
+                        {result.toml}
+                      </ClipboardCopy>
+                    </FormGroup>
                   </>
                 )}
               </CardBody>

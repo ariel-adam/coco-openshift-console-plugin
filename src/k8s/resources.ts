@@ -174,6 +174,41 @@ export const ConfigMapModel: K8sModel = {
   labelPlural: 'ConfigMaps',
 };
 
+// ---- RBAC for the attestation evidence sidecar ----
+// The evidence sidecar runs as its own ServiceAccount and needs a small Role
+// (write the evidence ConfigMap, read its own Pod) bound to that SA.
+export const ServiceAccountModel: K8sModel = {
+  apiVersion: 'v1',
+  kind: 'ServiceAccount',
+  plural: 'serviceaccounts',
+  namespaced: true,
+  abbr: 'SA',
+  label: 'ServiceAccount',
+  labelPlural: 'ServiceAccounts',
+};
+
+export const RoleModel: K8sModel = {
+  apiGroup: 'rbac.authorization.k8s.io',
+  apiVersion: 'v1',
+  kind: 'Role',
+  plural: 'roles',
+  namespaced: true,
+  abbr: 'R',
+  label: 'Role',
+  labelPlural: 'Roles',
+};
+
+export const RoleBindingModel: K8sModel = {
+  apiGroup: 'rbac.authorization.k8s.io',
+  apiVersion: 'v1',
+  kind: 'RoleBinding',
+  plural: 'rolebindings',
+  namespaced: true,
+  abbr: 'RB',
+  label: 'RoleBinding',
+  labelPlural: 'RoleBindings',
+};
+
 // ---- Well-known names / locations ----
 /** Where the OpenShift sandboxed containers operator and its config live. */
 export const OSC_NAMESPACE = 'openshift-sandboxed-containers-operator';
@@ -187,6 +222,13 @@ export const OSC_FEATURE_GATES_CM = 'osc-feature-gates';
 export const KATACONFIG_NAME = 'example-kataconfig';
 /** Pod annotation carrying the gzip+base64 initdata for a confidential pod. */
 export const CC_INIT_DATA_ANNOTATION = 'io.katacontainers.config.hypervisor.cc_init_data';
+
+/**
+ * coco-tools image — ships bash, oc, curl, and python3, used by the in-guest
+ * attestation evidence sidecar to fetch a CDH/KBS resource and publish the
+ * evidence ConfigMap the Trustee plugin reads.
+ */
+export const COCO_TOOLS_IMAGE = 'quay.io/openshift_sandboxed_containers/coco-tools:1.12';
 
 // `kind~group~version` reference string for action/flag extensions.
 export const KataConfigModelRef = 'kataconfiguration.openshift.io~v1~KataConfig';

@@ -41,11 +41,15 @@ import { Link, useLocation, useNavigate } from 'react-router-dom-v5-compat';
 import { useTranslation } from 'react-i18next';
 import {
   CC_INIT_DATA_ANNOTATION,
+  COCO_TOOLS_IMAGE,
   DeploymentModel,
   NamespaceGVK,
   NamespaceModel,
   PersistentVolumeClaimModel,
   PodModel,
+  RoleBindingModel,
+  RoleModel,
+  ServiceAccountModel,
   StorageClassGVK,
 } from '../k8s/resources';
 import type { NamespaceKind, StorageClassKind } from '../k8s/types';
@@ -58,6 +62,117 @@ const CREATE_NS_SENTINEL = '__coco_create_namespace__';
 const IS_DEFAULT_SC_ANNOTATION = 'storageclass.kubernetes.io/is-default-class';
 /** Placeholder shown when no LUKS helper image is supplied — must be replaced by the user. */
 const LUKS_HELPER_PLACEHOLDER = '<luks-helper-image>';
+
+// --- Attestation evidence sidecar ---
+/**
+ * Sanitize an arbitrary string into the suffix of a ConfigMap / RBAC object name.
+ * Kubernetes object names are RFC 1123 labels: lowercase alphanumerics and '-',
+ * and the evidence ConfigMap name must be <= 253 chars total.
+ */
+const sanitizeName = (raw: string): string =>
+  raw
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+/** ConfigMap the Trustee plugin reads; one per pod, in the workload's namespace. */
+const evidenceCmName = (podName: string): string =>
+  `attestation-evidence-${sanitizeName(podName)}`.slice(0, 253).replace(/-+$/g, '');
+
+/** ServiceAccount/Role/RoleBinding name for the sidecar (shared base name). */
+const evidenceRbacName = (podName: string): string =>
+  `${sanitizeName(podName)}-att-evidence`.slice(0, 253).replace(/-+$/g, '');
+
+/**
+ * Script run by the attestation-evidence sidecar. Built as single-quoted lines so
+ * every bash `${VAR}` stays literal — all user-supplied values arrive via the
+ * container env (POD_NAME, POD_NS, CDH_PATH, INTERVAL, CM_NAME, KBS_ENDPOINT, …),
+ * never via JS string interpolation. Each loop iteration:
+ *   1. fetches the pod object (best-effort) for the workload facts,
+ *   2. probes the Confidential Data Hub for a KBS resource (releases only after a
+ *      successful in-guest attestation) and maps the curl exit code to a verdict,
+ *   3. renders the trustee.attestation.evidence/v1 document with python3, and
+ *   4. publishes/labels the evidence ConfigMap the Trustee plugin reads.
+ */
+const SIDECAR_SCRIPT = [
+  'set -u',
+  'export HOME="${HOME:-/tmp}"',
+  'echo "attestation-evidence sidecar starting for ${POD_NS}/${POD_NAME}"',
+  'while true; do',
+  '  TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)',
+  '  oc get pod "${POD_NAME}" -n "${POD_NS}" -o json > /tmp/pod.json 2>/tmp/poderr || true',
+  '  curl -sf -m 10 "http://127.0.0.1:8006/cdh/resource/${CDH_PATH}" > /tmp/resp 2>/tmp/cerr; PRC=$?',
+  '  if [ "${PRC}" -eq 0 ]; then VERDICT=passed; elif [ "${PRC}" -eq 22 ]; then VERDICT=failed; else VERDICT=inconclusive; fi',
+  '  PRC="${PRC}" VERDICT="${VERDICT}" TS="${TS}" python3 - <<\'PYEOF\' > /tmp/evidence.json',
+  'import os, json, hashlib',
+  '',
+  '',
+  'def read(path, limit):',
+  '    try:',
+  '        with open(path) as f:',
+  '            return f.read()[:limit]',
+  '    except OSError:',
+  '        return ""',
+  '',
+  '',
+  'pod = {}',
+  'try:',
+  '    with open("/tmp/pod.json") as f:',
+  '        pod = json.load(f)',
+  'except (OSError, ValueError):',
+  '    pod = {}',
+  '',
+  'meta = pod.get("metadata", {}) or {}',
+  'spec = pod.get("spec", {}) or {}',
+  'status = pod.get("status", {}) or {}',
+  'annotations = meta.get("annotations", {}) or {}',
+  '',
+  'initdata = annotations.get("io.katacontainers.config.hypervisor.cc_init_data")',
+  'initdata_sha = (',
+  '    hashlib.sha256(initdata.encode("utf-8")).hexdigest() if initdata else None',
+  ')',
+  '',
+  'kbs = os.environ.get("KBS_ENDPOINT") or None',
+  'cluster = os.environ.get("CLUSTER_NAME") or None',
+  'resp = read("/tmp/resp", 4000)',
+  'cerr = read("/tmp/cerr", 1000)',
+  'verdict = os.environ.get("VERDICT", "inconclusive")',
+  'try:',
+  '    prc = int(os.environ.get("PRC", "-1"))',
+  'except ValueError:',
+  '    prc = -1',
+  '',
+  'evidence = {',
+  '    "schema": "trustee.attestation.evidence/v1",',
+  '    "source": "sidecar",',
+  '    "timestamp": os.environ.get("TS"),',
+  '    "cluster": cluster,',
+  '    "workload": {',
+  '        "namespace": meta.get("namespace") or os.environ.get("POD_NS"),',
+  '        "name": meta.get("name") or os.environ.get("POD_NAME"),',
+  '        "uid": meta.get("uid") or os.environ.get("POD_UID") or None,',
+  '        "node": spec.get("nodeName") or os.environ.get("NODE_NAME") or None,',
+  '        "runtimeClassName": spec.get("runtimeClassName"),',
+  '        "phase": status.get("phase"),',
+  '        "hasInitData": initdata is not None,',
+  '        "initdataSha256": initdata_sha,',
+  '    },',
+  '    "trustee": {"kbsEndpoint": kbs},',
+  '    "probe": {',
+  '        "method": "in-guest sidecar CDH resource fetch",',
+  '        "cdhPath": os.environ.get("CDH_PATH"),',
+  '        "execExitCode": prc,',
+  '        "response": resp,',
+  '        "error": cerr,',
+  '    },',
+  '    "verdict": verdict,',
+  '}',
+  'print(json.dumps(evidence, indent=2))',
+  'PYEOF',
+  '  oc create configmap "${CM_NAME}" -n "${POD_NS}" --from-file=evidence.json=/tmp/evidence.json --dry-run=client -o yaml | oc label --local -f - trustee.attestation/evidence=true "trustee.attestation/pod=${POD_NAME}" -o yaml | oc apply -f -',
+  '  sleep "${INTERVAL}"',
+  'done',
+].join('\n');
 
 const CreateConfidentialWorkload: FC = () => {
   const { t } = useTranslation('plugin__coco-openshift-console-plugin');
@@ -125,6 +240,11 @@ const CreateConfidentialWorkload: FC = () => {
   const pvcNameTouched = useRef(false);
   const scTouched = useRef(false);
 
+  // --- Attestation evidence sidecar (self-reporting, no exec) ---
+  const [evidenceSidecar, setEvidenceSidecar] = useState(false);
+  const [evidenceCdhPath, setEvidenceCdhPath] = useState('default/kbsres1');
+  const [evidenceInterval, setEvidenceInterval] = useState('60');
+
   const [storageClasses] = useK8sWatchResource<StorageClassKind[]>({
     groupVersionKind: StorageClassGVK,
     isList: true,
@@ -148,6 +268,11 @@ const CreateConfidentialWorkload: FC = () => {
   // Default the PVC name from the workload name until the user overrides it.
   const effectivePvcName = pvcNameTouched.current ? pvcName : pvcName || `${name.trim()}-enc`;
 
+  // The sidecar records which KBS it attested against. When this page was opened
+  // from the initdata builder, reuse the Trustee (KBS) URL baked into that
+  // initdata; otherwise leave it empty (the probe still works via the CDH).
+  const kbsEndpoint = fromBuilder?.trusteeUrl?.trim() ?? '';
+
   const valid =
     name.trim() !== '' &&
     nsTrimmed !== '' &&
@@ -166,6 +291,39 @@ const CreateConfidentialWorkload: FC = () => {
         ...(effectiveSc.trim() ? { storageClassName: effectiveSc.trim() } : {}),
       },
     }) as K8sResourceCommon;
+
+  // ServiceAccount + Role + RoleBinding the evidence sidecar runs as. Returned as
+  // a list so create() can apply them and the manifest preview can render them.
+  const buildEvidenceRbac = (): K8sResourceCommon[] => {
+    const rbacName = evidenceRbacName(name.trim());
+    return [
+      {
+        apiVersion: 'v1',
+        kind: 'ServiceAccount',
+        metadata: { name: rbacName, namespace: nsTrimmed },
+      } as K8sResourceCommon,
+      {
+        apiVersion: 'rbac.authorization.k8s.io/v1',
+        kind: 'Role',
+        metadata: { name: rbacName, namespace: nsTrimmed },
+        rules: [
+          {
+            apiGroups: [''],
+            resources: ['configmaps'],
+            verbs: ['get', 'create', 'patch', 'update'],
+          },
+          { apiGroups: [''], resources: ['pods'], verbs: ['get'] },
+        ],
+      } as unknown as K8sResourceCommon,
+      {
+        apiVersion: 'rbac.authorization.k8s.io/v1',
+        kind: 'RoleBinding',
+        metadata: { name: rbacName, namespace: nsTrimmed },
+        subjects: [{ kind: 'ServiceAccount', name: rbacName, namespace: nsTrimmed }],
+        roleRef: { apiGroup: 'rbac.authorization.k8s.io', kind: 'Role', name: rbacName },
+      } as unknown as K8sResourceCommon,
+    ];
+  };
 
   const buildManifest = (initdataValue: string): K8sResourceCommon => {
     const cmd = command.trim() ? command.trim().split(/\s+/) : undefined;
@@ -200,9 +358,35 @@ const CreateConfidentialWorkload: FC = () => {
       ? [{ name: 'enc-vol', persistentVolumeClaim: { claimName: effectivePvcName.trim() } }]
       : undefined;
 
+    // The attestation evidence sidecar is a *declared* container (not `oc exec`,
+    // which secure CoCo workloads forbid), so it runs inside the same TEE as the
+    // workload and continuously proves attestation, publishing evidence to a
+    // ConfigMap the Trustee plugin reads. All user values flow in via env so the
+    // SIDECAR_SCRIPT can be a constant with literal bash `${VAR}` references.
+    const podName = name.trim();
+    const evidenceContainer = evidenceSidecar
+      ? {
+          name: 'attestation-evidence',
+          image: COCO_TOOLS_IMAGE,
+          command: ['bash', '-c', SIDECAR_SCRIPT],
+          env: [
+            { name: 'HOME', value: '/tmp' },
+            { name: 'POD_NAME', valueFrom: { fieldRef: { fieldPath: 'metadata.name' } } },
+            { name: 'POD_NS', valueFrom: { fieldRef: { fieldPath: 'metadata.namespace' } } },
+            { name: 'POD_UID', valueFrom: { fieldRef: { fieldPath: 'metadata.uid' } } },
+            { name: 'NODE_NAME', valueFrom: { fieldRef: { fieldPath: 'spec.nodeName' } } },
+            { name: 'CDH_PATH', value: evidenceCdhPath.trim() || 'default/kbsres1' },
+            { name: 'INTERVAL', value: evidenceInterval.trim() || '60' },
+            { name: 'CM_NAME', value: evidenceCmName(podName) },
+            { name: 'KBS_ENDPOINT', value: kbsEndpoint },
+          ],
+        }
+      : undefined;
+
     const podSpec = {
       runtimeClassName: runtimeClass,
-      containers: [container],
+      ...(evidenceContainer ? { serviceAccountName: evidenceRbacName(podName) } : {}),
+      containers: evidenceContainer ? [container, evidenceContainer] : [container],
       ...(initContainers ? { initContainers } : {}),
       ...(volumes ? { volumes } : {}),
     };
@@ -241,10 +425,14 @@ const CreateConfidentialWorkload: FC = () => {
       ? `${trimmedInitdata.slice(0, 80)}… (${trimmedInitdata.length} chars)`
       : trimmedInitdata;
   const workloadPreview = JSON.stringify(buildManifest(previewInitdata), null, 2);
-  // Show the PVC manifest above the workload so the user sees everything that gets created.
-  const preview = enc
-    ? `${JSON.stringify(buildPvc(), null, 2)}\n---\n${workloadPreview}`
-    : workloadPreview;
+  // Show every additional object that gets created above the workload (PVC for the
+  // LUKS volume, ServiceAccount/Role/RoleBinding for the evidence sidecar), so the
+  // preview matches exactly what create() applies.
+  const preview = [
+    ...(enc ? [JSON.stringify(buildPvc(), null, 2)] : []),
+    ...(evidenceSidecar ? buildEvidenceRbac().map((r) => JSON.stringify(r, null, 2)) : []),
+    workloadPreview,
+  ].join('\n---\n');
 
   const create = async () => {
     setBusy(true);
@@ -261,11 +449,32 @@ const CreateConfidentialWorkload: FC = () => {
           } as K8sResourceCommon,
         });
       }
-      // 2) Create the encrypted PVC before the workload that consumes it.
+      // 2) Provision RBAC for the evidence sidecar before the workload that uses
+      //    it: a dedicated ServiceAccount plus a tightly-scoped Role (write the
+      //    evidence ConfigMap, read its own Pod) and a RoleBinding. Idempotent —
+      //    re-creating a workload of the same name swallows AlreadyExists.
+      if (evidenceSidecar) {
+        const [sa, role, roleBinding] = buildEvidenceRbac();
+        const createIdempotent = async (
+          model: typeof ServiceAccountModel,
+          data: K8sResourceCommon,
+        ) => {
+          try {
+            await k8sCreate({ model, data });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!/already exists/i.test(msg)) throw e;
+          }
+        };
+        await createIdempotent(ServiceAccountModel, sa);
+        await createIdempotent(RoleModel, role);
+        await createIdempotent(RoleBindingModel, roleBinding);
+      }
+      // 3) Create the encrypted PVC before the workload that consumes it.
       if (enc) {
         await k8sCreate({ model: PersistentVolumeClaimModel, data: buildPvc() });
       }
-      // 3) Create the workload.
+      // 4) Create the workload.
       await k8sCreate({
         model: kind === 'Pod' ? PodModel : DeploymentModel,
         data: buildManifest(trimmedInitdata),
@@ -298,9 +507,7 @@ const CreateConfidentialWorkload: FC = () => {
             {fromBuilder.pcr8 && (
               <>
                 <p className="coco-openshift-console-plugin__mb">
-                  {t(
-                    'Before it can attest, register this PCR8 reference value in Trustee:',
-                  )}
+                  {t('Before it can attest, register this PCR8 reference value in Trustee:')}
                 </p>
                 <ClipboardCopy
                   isReadOnly
@@ -633,6 +840,72 @@ const CreateConfidentialWorkload: FC = () => {
                             )}
                           </HelperTextItem>
                         </HelperText>
+                      </FormGroup>
+                    </>
+                  )}
+
+                  <FormGroup fieldId="cw-evidence">
+                    <Checkbox
+                      id="cw-evidence"
+                      label={t(
+                        'Add attestation evidence sidecar (self-reporting, no exec required)',
+                      )}
+                      description={t(
+                        'Run a declared container inside the TEE that continuously fetches a KBS resource to prove attestation and publishes a timestamped evidence record the Trustee plugin reads.',
+                      )}
+                      isChecked={evidenceSidecar}
+                      onChange={(_e, checked) => {
+                        setEvidenceSidecar(checked);
+                      }}
+                    />
+                  </FormGroup>
+                  {evidenceSidecar && (
+                    <>
+                      <Alert
+                        variant="info"
+                        isInline
+                        title={t('How the evidence sidecar works')}
+                        className="coco-openshift-console-plugin__mb"
+                      >
+                        <p className="coco-openshift-console-plugin__mb">
+                          {t(
+                            'The sidecar runs inside the TEE as a declared container — not via oc exec, which secure confidential workloads forbid. It proves attestation by fetching a KBS resource through the Confidential Data Hub (the resource is only released after a successful attestation) and pushes a timestamped evidence record to a ConfigMap.',
+                          )}
+                        </p>
+                        <p>
+                          {t(
+                            'The Confidential Attestation → Attestation status view shows that record. The sidecar must be present at pod creation; it cannot be added to a running pod.',
+                          )}
+                        </p>
+                      </Alert>
+                      <FormGroup label={t('CDH resource path')} fieldId="cw-evidence-cdh">
+                        <TextInput
+                          id="cw-evidence-cdh"
+                          value={evidenceCdhPath}
+                          onChange={(_e, v) => {
+                            setEvidenceCdhPath(v);
+                          }}
+                        />
+                        <HelperText>
+                          <HelperTextItem>
+                            {t(
+                              'A KBS resource the guest fetches; it only releases after a successful attestation',
+                            )}
+                          </HelperTextItem>
+                        </HelperText>
+                      </FormGroup>
+                      <FormGroup
+                        label={t('Refresh interval seconds')}
+                        fieldId="cw-evidence-interval"
+                      >
+                        <TextInput
+                          id="cw-evidence-interval"
+                          type="number"
+                          value={evidenceInterval}
+                          onChange={(_e, v) => {
+                            setEvidenceInterval(v);
+                          }}
+                        />
                       </FormGroup>
                     </>
                   )}

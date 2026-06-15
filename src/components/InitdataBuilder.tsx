@@ -7,18 +7,25 @@ import {
   CardTitle,
   Checkbox,
   ClipboardCopy,
+  Content,
   Form,
   FormGroup,
+  FormHelperText,
   FormSelect,
   FormSelectOption,
   Grid,
   GridItem,
+  HelperText,
+  HelperTextItem,
   PageSection,
+  ProgressStep,
+  ProgressStepper,
   TextArea,
   TextInput,
 } from '@patternfly/react-core';
 import type { FC } from 'react';
 import { useState } from 'react';
+import { Link } from 'react-router-dom-v5-compat';
 import { useTranslation } from 'react-i18next';
 import { CC_INIT_DATA_ANNOTATION } from '../k8s/resources';
 import {
@@ -36,6 +43,99 @@ const DEFAULT_ALLOW: Record<SensitiveRequest, boolean> = {
   WriteStreamRequest: false,
   SetPolicyRequest: false,
   PullImageRequest: true,
+};
+
+/** Confidential Attestation overview (Trustee plugin) — where reference values live. */
+const TRUSTEE_OVERVIEW = '/trustee';
+/** Create confidential workload form (this plugin). */
+const CREATE_WORKLOAD = '/confidential-containers/workloads/new';
+
+const HowItWorks: FC = () => {
+  const { t } = useTranslation('plugin__coco-openshift-console-plugin');
+  return (
+    <Card className="coco-openshift-console-plugin__mb">
+      <CardTitle>
+        {t('How this works — from initdata to a running confidential workload')}
+      </CardTitle>
+      <CardBody>
+        <Content className="coco-openshift-console-plugin__mb">
+          <Content component="p">
+            {t(
+              'Initdata is a small, tamper-evident configuration baked into a confidential pod. At boot the guest reads it to find your Trustee (the Key Broker Service, KBS) and to constrain what the Kata agent is allowed to do. Because initdata is measured into PCR8, Trustee can prove it has not been altered before releasing any secrets. Generating it is step 1 of six:',
+            )}
+          </Content>
+        </Content>
+        <ProgressStepper isVertical aria-label={t('Confidential workload attestation flow')}>
+          <ProgressStep
+            variant="info"
+            id="cc-flow-1"
+            titleId="cc-flow-1-title"
+            aria-label={t('Step 1')}
+            description={t(
+              'Set your Trustee (KBS) URL and the Kata agent policy on the left, then Generate. Everything is computed in your browser — nothing is sent anywhere.',
+            )}
+          >
+            {t('Generate initdata (here)')}
+          </ProgressStep>
+          <ProgressStep
+            variant="info"
+            id="cc-flow-2"
+            titleId="cc-flow-2-title"
+            aria-label={t('Step 2')}
+            description={t(
+              'Add the PCR8 reference value to Trustee’s reference values (RVPS). This is what lets attestation trust pods that carry this initdata — without it, Trustee refuses to release secrets and the pod cannot start its workload.',
+            )}
+          >
+            {t('Register the reference value with Trustee')}
+          </ProgressStep>
+          <ProgressStep
+            variant="info"
+            id="cc-flow-3"
+            titleId="cc-flow-3-title"
+            aria-label={t('Step 3')}
+            description={t(
+              'Create a Pod or Deployment with runtimeClassName: kata-cc (or kata-cc-nvidia-gpu) and the cc_init_data annotation. Use the Pod manifest snippet below, or the Create confidential workload form.',
+            )}
+          >
+            {t('Deploy your workload')}
+          </ProgressStep>
+          <ProgressStep
+            variant="pending"
+            id="cc-flow-4"
+            titleId="cc-flow-4-title"
+            aria-label={t('Step 4')}
+            description={t(
+              'The pod starts inside a hardware TEE. Its attestation agent sends evidence — including the PCR8 measurement of this initdata — to the Trustee KBS at the URL you configured.',
+            )}
+          >
+            {t('The pod attests at boot (automatic)')}
+          </ProgressStep>
+          <ProgressStep
+            variant="pending"
+            id="cc-flow-5"
+            titleId="cc-flow-5-title"
+            aria-label={t('Step 5')}
+            description={t(
+              'Trustee checks the evidence against the registered reference values and the attestation policy. On success it returns an attestation token and releases the keys and secrets your workload requested.',
+            )}
+          >
+            {t('Trustee verifies and releases secrets (automatic)')}
+          </ProgressStep>
+          <ProgressStep
+            variant="pending"
+            id="cc-flow-6"
+            titleId="cc-flow-6-title"
+            aria-label={t('Step 6')}
+            description={t(
+              'Your data stays encrypted in use, even from the host. Confirm attestation succeeded with the Verify attestation action on the pod, or from the Workloads list.',
+            )}
+          >
+            {t('Workload runs confidentially')}
+          </ProgressStep>
+        </ProgressStepper>
+      </CardBody>
+    </Card>
+  );
 };
 
 const InitdataBuilder: FC = () => {
@@ -85,10 +185,11 @@ const InitdataBuilder: FC = () => {
       <DocumentTitle>{t('Initdata builder')}</DocumentTitle>
       <ListPageHeader title={t('Initdata builder')} />
       <PageSection>
+        <HowItWorks />
         <Grid hasGutter>
           <GridItem md={6}>
             <Card>
-              <CardTitle>{t('Configuration')}</CardTitle>
+              <CardTitle>{t('1. Configure initdata')}</CardTitle>
               <CardBody>
                 <Form>
                   <FormGroup label={t('Trustee (KBS) URL')} isRequired fieldId="trustee-url">
@@ -99,6 +200,15 @@ const InitdataBuilder: FC = () => {
                         setTrusteeUrl(v);
                       }}
                     />
+                    <FormHelperText>
+                      <HelperText>
+                        <HelperTextItem>
+                          {t(
+                            'Where the guest reaches your Trustee. In-cluster this is kbs-service.<namespace>:8080; in hub-and-spoke it is the externally reachable KBS route.',
+                          )}
+                        </HelperTextItem>
+                      </HelperText>
+                    </FormHelperText>
                   </FormGroup>
                   <FormGroup label={t('Measurement algorithm')} fieldId="algorithm">
                     <FormSelect
@@ -166,7 +276,7 @@ const InitdataBuilder: FC = () => {
 
           <GridItem md={6}>
             <Card>
-              <CardTitle>{t('Output')}</CardTitle>
+              <CardTitle>{t('2. Output — and what to do with it')}</CardTitle>
               <CardBody>
                 {error && (
                   <Alert
@@ -199,6 +309,16 @@ const InitdataBuilder: FC = () => {
                       >
                         {result.annotation}
                       </ClipboardCopy>
+                      <FormHelperText>
+                        <HelperText>
+                          <HelperTextItem>
+                            {t(
+                              'The deployable form of your initdata. Set it as the {{key}} annotation on your confidential Pod (or Deployment pod template).',
+                              { key: CC_INIT_DATA_ANNOTATION },
+                            )}
+                          </HelperTextItem>
+                        </HelperText>
+                      </FormHelperText>
                     </FormGroup>
                     <FormGroup
                       label={t('PCR8 reference value (add to Trustee RVPS)')}
@@ -208,6 +328,15 @@ const InitdataBuilder: FC = () => {
                       <ClipboardCopy isReadOnly hoverTip={t('Copy')} clickTip={t('Copied')}>
                         {result.pcr8}
                       </ClipboardCopy>
+                      <FormHelperText>
+                        <HelperText>
+                          <HelperTextItem variant="warning">
+                            {t(
+                              'A measurement of exactly this initdata. Register it in Trustee’s reference values (RVPS) before you deploy — otherwise attestation fails and Trustee withholds secrets. Open Confidential Attestation → your TrusteeConfig → Reference values.',
+                            )}
+                          </HelperTextItem>
+                        </HelperText>
+                      </FormHelperText>
                     </FormGroup>
                     <FormGroup
                       label={t('Pod manifest snippet')}
@@ -223,6 +352,15 @@ const InitdataBuilder: FC = () => {
                       >
                         {podSnippet}
                       </ClipboardCopy>
+                      <FormHelperText>
+                        <HelperText>
+                          <HelperTextItem>
+                            {t(
+                              'Ready to paste into a Pod or Deployment template — it sets the confidential runtime class and the annotation for you. Switch kata-cc to kata-cc-nvidia-gpu for confidential GPU workloads.',
+                            )}
+                          </HelperTextItem>
+                        </HelperText>
+                      </FormHelperText>
                     </FormGroup>
                     <FormGroup
                       label={t('Generated initdata.toml')}
@@ -239,7 +377,36 @@ const InitdataBuilder: FC = () => {
                       >
                         {result.toml}
                       </ClipboardCopy>
+                      <FormHelperText>
+                        <HelperText>
+                          <HelperTextItem>
+                            {t(
+                              'Human-readable source the annotation encodes — for review and audit. You deploy the annotation above, not this file.',
+                            )}
+                          </HelperTextItem>
+                        </HelperText>
+                      </FormHelperText>
                     </FormGroup>
+
+                    <div className="coco-openshift-console-plugin__mt">
+                      <Content component="p">
+                        <strong>{t('Next steps')}</strong>
+                      </Content>
+                      <Button
+                        variant="primary"
+                        className="coco-openshift-console-plugin__mb"
+                        component={(props) => <Link {...props} to={TRUSTEE_OVERVIEW} />}
+                      >
+                        {t('Register reference value in Confidential Attestation')}
+                      </Button>{' '}
+                      <Button
+                        variant="secondary"
+                        className="coco-openshift-console-plugin__mb"
+                        component={(props) => <Link {...props} to={CREATE_WORKLOAD} />}
+                      >
+                        {t('Create confidential workload')}
+                      </Button>
+                    </div>
                   </>
                 )}
               </CardBody>

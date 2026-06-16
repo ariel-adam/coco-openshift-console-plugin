@@ -82,7 +82,8 @@
       "ConfidentialWorkloadsList": "./components/ConfidentialWorkloadsList",
       "TeeNodesList": "./components/TeeNodesList",
       "RuntimeClassesList": "./components/RuntimeClassesList",
-      "CreateConfidentialWorkload": "./components/CreateConfidentialWorkload"
+      "CreateConfidentialWorkload": "./components/CreateConfidentialWorkload",
+      "AttestationTopology": "./components/AttestationTopology"
     },
     "dependencies": {
       "@console/pluginAPI": "^4.21.0"

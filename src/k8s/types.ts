@@ -55,6 +55,14 @@ export type StorageClassKind = K8sResourceCommon & {
   metadata?: K8sResourceCommon['metadata'] & { annotations?: Record<string, string> };
 };
 
+/** config.openshift.io/v1 Infrastructure — we read status.infrastructureName for the cluster name. */
+export type InfrastructureKind = K8sResourceCommon & {
+  status?: {
+    infrastructureName?: string;
+    platform?: string;
+  };
+};
+
 /** A v1 Node — we read labels (TEE/GPU-CC), allocatable (device resources) and Ready. */
 export type NodeKind = K8sResourceCommon & {
   status?: {

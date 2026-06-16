@@ -83,3 +83,137 @@
 .coco-openshift-console-plugin__icon-info {
   color: var(--pf-t--global--icon--color--status--info--default);
 }
+
+/* ---- attestation topology (SVG) ---- */
+.coco-openshift-console-plugin__topo {
+  overflow: auto;
+  max-block-size: 72vh;
+  padding: var(--pf-t--global--spacer--sm, 0.5rem);
+  border: 1px solid var(--pf-t--global--border--color--default);
+  border-radius: var(--pf-t--global--border--radius--small, 3px);
+  background-color: var(--pf-t--global--background--color--secondary--default);
+}
+
+.coco-openshift-console-plugin__topo-title {
+  fill: var(--pf-t--global--text--color--regular);
+  font-size: var(--pf-t--global--font--size--md, 1rem);
+  font-weight: var(--pf-t--global--font--weight--body--bold, 700);
+}
+
+.coco-openshift-console-plugin__topo-text {
+  fill: var(--pf-t--global--text--color--regular);
+  font-size: var(--pf-t--global--font--size--sm, 0.875rem);
+}
+
+.coco-openshift-console-plugin__topo-subtle {
+  fill: var(--pf-t--global--text--color--subtle);
+  font-size: var(--pf-t--global--font--size--xs, 0.75rem);
+}
+
+.coco-openshift-console-plugin__topo-mono {
+  fill: var(--pf-t--global--text--color--subtle);
+  font-family: var(--pf-t--global--font--family--mono, monospace);
+  font-size: var(--pf-t--global--font--size--xs, 0.75rem);
+}
+
+.coco-openshift-console-plugin__topo-attest--local {
+  fill: var(--pf-t--global--icon--color--status--success--default);
+  font-size: var(--pf-t--global--font--size--xs, 0.75rem);
+}
+
+.coco-openshift-console-plugin__topo-attest--remote {
+  fill: var(--pf-t--global--icon--color--status--warning--default);
+  font-size: var(--pf-t--global--font--size--xs, 0.75rem);
+}
+
+.coco-openshift-console-plugin__topo-attest--none {
+  fill: var(--pf-t--global--text--color--subtle);
+  font-size: var(--pf-t--global--font--size--xs, 0.75rem);
+}
+
+.coco-openshift-console-plugin__topo-hub {
+  fill: var(--pf-t--global--background--color--primary--default);
+  stroke: var(--pf-t--global--icon--color--status--info--default);
+  stroke-width: 2;
+}
+
+.coco-openshift-console-plugin__topo-cluster {
+  fill: var(--pf-t--global--background--color--secondary--default);
+  stroke: var(--pf-t--global--border--color--default);
+}
+
+.coco-openshift-console-plugin__topo-node {
+  fill: var(--pf-t--global--background--color--primary--default);
+  stroke: var(--pf-t--global--border--color--default);
+}
+
+.coco-openshift-console-plugin__topo-wl {
+  fill: var(--pf-t--global--background--color--secondary--default);
+  stroke: var(--pf-t--global--border--color--default);
+}
+
+.coco-openshift-console-plugin__topo-edge {
+  fill: none;
+  stroke: var(--pf-t--global--icon--color--status--info--default);
+  stroke-width: 1.5;
+}
+
+.coco-openshift-console-plugin__topo-arrowhead {
+  fill: var(--pf-t--global--icon--color--status--info--default);
+}
+
+.coco-openshift-console-plugin__topo-dot--healthy {
+  fill: var(--pf-t--global--icon--color--status--success--default);
+}
+
+.coco-openshift-console-plugin__topo-dot--pending {
+  fill: var(--pf-t--global--icon--color--status--warning--default);
+}
+
+.coco-openshift-console-plugin__topo-dot--error {
+  fill: var(--pf-t--global--icon--color--status--danger--default);
+}
+
+.coco-openshift-console-plugin__topo-clickable {
+  cursor: pointer;
+}
+
+.coco-openshift-console-plugin__topo-clickable:hover .coco-openshift-console-plugin__topo-node,
+.coco-openshift-console-plugin__topo-clickable:hover .coco-openshift-console-plugin__topo-wl {
+  stroke: var(--pf-t--global--icon--color--status--info--default);
+  stroke-width: 2;
+}
+
+/* ---- topology legend ---- */
+.coco-openshift-console-plugin__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-t--global--spacer--md, 1rem);
+  align-items: center;
+}
+
+.coco-openshift-console-plugin__legend-item {
+  display: inline-flex;
+  gap: var(--pf-t--global--spacer--xs, 0.25rem);
+  align-items: center;
+  font-size: var(--pf-t--global--font--size--sm, 0.875rem);
+}
+
+.coco-openshift-console-plugin__legend-dot {
+  display: inline-block;
+  inline-size: 0.6rem;
+  block-size: 0.6rem;
+  border-radius: 50%;
+}
+
+.coco-openshift-console-plugin__legend-dot--healthy {
+  background-color: var(--pf-t--global--icon--color--status--success--default);
+}
+
+.coco-openshift-console-plugin__legend-dot--pending {
+  background-color: var(--pf-t--global--icon--color--status--warning--default);
+}
+
+.coco-openshift-console-plugin__legend-dot--error {
+  background-color: var(--pf-t--global--icon--color--status--danger--default);
+}

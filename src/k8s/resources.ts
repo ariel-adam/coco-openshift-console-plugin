@@ -52,6 +52,13 @@ export const ClusterVersionGVK: K8sGroupVersionKind = {
   kind: 'ClusterVersion',
 };
 
+/** config.openshift.io/v1 Infrastructure — read status.infrastructureName for the cluster name. */
+export const InfrastructureGVK: K8sGroupVersionKind = {
+  group: 'config.openshift.io',
+  version: 'v1',
+  kind: 'Infrastructure',
+};
+
 /** machineconfiguration.openshift.io/v1 MachineConfig — sets host kernel arguments. */
 export const MachineConfigGVK: K8sGroupVersionKind = {
   group: 'machineconfiguration.openshift.io',
@@ -264,6 +271,15 @@ export const OSC_FEATURE_GATES_CM = 'osc-feature-gates';
 export const KATACONFIG_NAME = 'example-kataconfig';
 /** Pod annotation carrying the gzip+base64 initdata for a confidential pod. */
 export const CC_INIT_DATA_ANNOTATION = 'io.katacontainers.config.hypervisor.cc_init_data';
+
+/**
+ * The Trustee Key Broker Service in-cluster Service name + port. The attestation
+ * topology decodes each workload's initdata KBS URL and compares its host against
+ * `kbs-service.<ns>` to tell an in-cluster (co-located) Trustee from a remote one
+ * (hub-and-spoke). CoCo itself never deploys Trustee — this is only for classification.
+ */
+export const KBS_SERVICE_NAME = 'kbs-service';
+export const KBS_SERVICE_PORT = 8080;
 
 /**
  * coco-tools image — ships bash, oc, curl, and python3. Kept for tooling that

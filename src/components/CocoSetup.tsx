@@ -1,4 +1,9 @@
-import { DocumentTitle, ListPageHeader, ResourceLink } from '@openshift-console/dynamic-plugin-sdk';
+import {
+  DocumentTitle,
+  ListPageHeader,
+  ResourceLink,
+  useK8sWatchResource,
+} from '@openshift-console/dynamic-plugin-sdk';
 import {
   Button,
   Card,
@@ -19,7 +24,7 @@ import {
   PlusCircleIcon,
 } from '@patternfly/react-icons';
 import type { FC, ReactNode } from 'react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom-v5-compat';
 import { useTranslation } from 'react-i18next';
 import {
@@ -28,11 +33,13 @@ import {
   useRuntimeClasses,
   useTeeNodes,
 } from '../k8s/hooks';
-import { KataConfigGVK } from '../k8s/resources';
+import { DaemonSetGVK, DeploymentGVK, INTEL_DCAP_NAMESPACE, KataConfigGVK } from '../k8s/resources';
+import type { DaemonSetKind, DeploymentKind } from '../k8s/types';
 import { isConfidentialRuntimeClass } from '../utils/runtime';
 import { kataInstallSummary } from '../utils/status';
 import { EnableConfidentialContainers } from './EnableConfidentialContainers';
 import { EnableKataConfig } from './EnableKataConfig';
+import DeployTdxAttestationModal from './DeployTdxAttestationModal';
 import './coco.css';
 
 type Status = 'done' | 'todo' | 'warn' | 'info';
@@ -85,6 +92,27 @@ const CocoSetup: FC = () => {
     snp: teeNodes.some((n) => n.tee === 'snp'),
     gpu: teeNodes.some((n) => n.gpuCcReady),
   };
+  const tdxNodeCount = teeNodes.filter((n) => n.tee === 'tdx').length;
+
+  // Live status of the Intel TDX remote-attestation infrastructure (PCCS + QGS).
+  // Named-resource watches 404 silently when absent; we only read readiness.
+  const [pccsDep] = useK8sWatchResource<DeploymentKind>({
+    groupVersionKind: DeploymentGVK,
+    name: 'pccs',
+    namespace: INTEL_DCAP_NAMESPACE,
+  });
+  const [qgsDs] = useK8sWatchResource<DaemonSetKind>({
+    groupVersionKind: DaemonSetGVK,
+    name: 'tdx-qgs',
+    namespace: INTEL_DCAP_NAMESPACE,
+  });
+  const qgsDesired = qgsDs?.status?.desiredNumberScheduled ?? 0;
+  const qgsReady = qgsDs?.status?.numberReady ?? 0;
+  const attestPresent = Boolean(pccsDep?.metadata) || Boolean(qgsDs?.metadata);
+  const attestReady =
+    (pccsDep?.status?.availableReplicas ?? 0) > 0 && qgsDesired > 0 && qgsReady >= qgsDesired;
+
+  const [tdxSetupOpen, setTdxSetupOpen] = useState(false);
 
   const steps: Step[] = [
     {
@@ -156,20 +184,52 @@ const CocoSetup: FC = () => {
     },
     {
       title: t('Attestation infrastructure (TEE quote generation)'),
-      // Can't auto-verify the host quote-generation stack, but it's the most
-      // commonly-missed prerequisite — without it every attestation fails with an
-      // empty quote, so flag it for review.
-      status: 'warn',
-      detail: (
+      // For Intel TDX this is now live (PCCS + QGS watched in intel-dcap). It is the
+      // most commonly-missed prerequisite — without it every attestation fails with
+      // an empty quote — so when it is absent we flag it as a warning.
+      status: attestReady ? 'done' : attestPresent ? 'info' : 'warn',
+      detail: attestReady ? (
         <>
           {t(
-            'Attestation needs the host quote-generation stack for your TEE. Without it the guest sends an empty quote and Trustee rejects it — pods still run, but no secret is ever released. Confirm it is deployed for your hardware:',
+            'Intel TDX quote generation is running — PCCS (PCK certificate cache) and the per-node QGS are up in the intel-dcap namespace, so TDX pods can produce signed quotes.',
           )}
+          <Flex
+            alignItems={{ default: 'alignItemsCenter' }}
+            gap={{ default: 'gapSm' }}
+            className="coco-openshift-console-plugin__mt"
+          >
+            <FlexItem>
+              <ResourceLink
+                groupVersionKind={DeploymentGVK}
+                name="pccs"
+                namespace={INTEL_DCAP_NAMESPACE}
+                inline
+              />
+            </FlexItem>
+            <FlexItem>
+              <ResourceLink
+                groupVersionKind={DaemonSetGVK}
+                name="tdx-qgs"
+                namespace={INTEL_DCAP_NAMESPACE}
+                inline
+              />
+            </FlexItem>
+          </Flex>
+        </>
+      ) : (
+        <>
+          {attestPresent
+            ? t(
+                'The Intel TDX attestation infrastructure is deploying in intel-dcap. It is ready once PCCS is available and the QGS DaemonSet is running on your TDX nodes.',
+              )
+            : t(
+                'Attestation needs the host quote-generation stack for your TEE. Without it the guest sends an empty quote and Trustee rejects it — pods still run, but no secret is ever released. Confirm it is deployed for your hardware:',
+              )}
           <ul className="coco-openshift-console-plugin__mt">
             {teeKinds.tdx && (
               <li>
                 {t(
-                  'Intel TDX — deploy a Quote Generation Service (QGS) and a PCCS for PCK collateral (Intel DCAP). The guest reaches the QGS over vsock.',
+                  'Intel TDX — deploy a Quote Generation Service (QGS) and a PCCS for PCK collateral (Intel DCAP). The guest reaches the QGS over vsock. Use the guided setup on the right.',
                 )}
               </li>
             )}
@@ -198,17 +258,35 @@ const CocoSetup: FC = () => {
         </>
       ),
       node: (
-        <Button
-          variant="secondary"
-          component="a"
-          href="https://docs.redhat.com/en/documentation/openshift_sandboxed_containers"
-          target="_blank"
-          rel="noopener noreferrer"
-          icon={<ExternalLinkAltIcon />}
-          iconPosition="end"
+        <Flex
+          direction={{ default: 'column' }}
+          gap={{ default: 'gapSm' }}
+          alignItems={{ default: 'alignItemsFlexEnd' }}
         >
-          {t('Attestation setup docs')}
-        </Button>
+          {teeKinds.tdx && (
+            <FlexItem>
+              <Button
+                variant={attestReady ? 'secondary' : 'primary'}
+                onClick={() => setTdxSetupOpen(true)}
+              >
+                {attestReady ? t('Reconfigure TDX attestation') : t('Set up Intel TDX attestation')}
+              </Button>
+            </FlexItem>
+          )}
+          <FlexItem>
+            <Button
+              variant="link"
+              component="a"
+              href="https://docs.redhat.com/en/documentation/openshift_sandboxed_containers/1.12/html/deploying_confidential_containers/configure-confidential-containers#deploying-intel-tdx-remote-attestation_bare-metal-cc"
+              target="_blank"
+              rel="noopener noreferrer"
+              icon={<ExternalLinkAltIcon />}
+              iconPosition="end"
+            >
+              {t('Attestation setup docs')}
+            </Button>
+          </FlexItem>
+        </Flex>
       ),
     },
     {
@@ -282,6 +360,12 @@ const CocoSetup: FC = () => {
           </CardBody>
         </Card>
       </PageSection>
+      {tdxSetupOpen && (
+        <DeployTdxAttestationModal
+          tdxNodeCount={tdxNodeCount}
+          onClose={() => setTdxSetupOpen(false)}
+        />
+      )}
     </>
   );
 };

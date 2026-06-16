@@ -107,6 +107,8 @@ export const DaemonSetGVK: K8sGroupVersionKind = {
   version: 'v1',
   kind: 'DaemonSet',
 };
+export const JobGVK: K8sGroupVersionKind = { group: 'batch', version: 'v1', kind: 'Job' };
+export const ServiceGVK: K8sGroupVersionKind = { version: 'v1', kind: 'Service' };
 export const ConfigMapGVK: K8sGroupVersionKind = { version: 'v1', kind: 'ConfigMap' };
 export const SecretGVK: K8sGroupVersionKind = { version: 'v1', kind: 'Secret' };
 export const EventGVK: K8sGroupVersionKind = { version: 'v1', kind: 'Event' };
@@ -180,6 +182,28 @@ export const ConfigMapModel: K8sModel = {
   labelPlural: 'ConfigMaps',
 };
 
+export const SecretModel: K8sModel = {
+  apiVersion: 'v1',
+  kind: 'Secret',
+  plural: 'secrets',
+  namespaced: true,
+  abbr: 'S',
+  label: 'Secret',
+  labelPlural: 'Secrets',
+};
+
+/** batch/v1 Job — used to run in-cluster setup scripts (e.g. TDX attestation infra). */
+export const JobModel: K8sModel = {
+  apiGroup: 'batch',
+  apiVersion: 'v1',
+  kind: 'Job',
+  plural: 'jobs',
+  namespaced: true,
+  abbr: 'J',
+  label: 'Job',
+  labelPlural: 'Jobs',
+};
+
 // ---- RBAC for the attestation evidence sidecar ----
 // The evidence sidecar runs as its own ServiceAccount and needs a small Role
 // (write the evidence ConfigMap, read its own Pod) bound to that SA.
@@ -215,6 +239,18 @@ export const RoleBindingModel: K8sModel = {
   labelPlural: 'RoleBindings',
 };
 
+/** Cluster-scoped binding — the TDX attestation setup Job runs as cluster-admin. */
+export const ClusterRoleBindingModel: K8sModel = {
+  apiGroup: 'rbac.authorization.k8s.io',
+  apiVersion: 'v1',
+  kind: 'ClusterRoleBinding',
+  plural: 'clusterrolebindings',
+  namespaced: false,
+  abbr: 'CRB',
+  label: 'ClusterRoleBinding',
+  labelPlural: 'ClusterRoleBindings',
+};
+
 // ---- Well-known names / locations ----
 /** Where the OpenShift sandboxed containers operator and its config live. */
 export const OSC_NAMESPACE = 'openshift-sandboxed-containers-operator';
@@ -245,6 +281,36 @@ export const COCO_TOOLS_IMAGE = 'quay.io/openshift_sandboxed_containers/coco-too
  * evidence ConfigMap straight to the Kubernetes API with curl — no oc, no python.
  */
 export const EVIDENCE_SIDECAR_IMAGE = 'registry.access.redhat.com/ubi9/ubi-minimal:latest';
+
+/**
+ * Full UBI9 (not ubi-minimal) — ships openssl, curl, base64, sha512sum, sed and
+ * bash. Used as the runner for the TDX attestation setup Job (which needs openssl
+ * to mint the throwaway PCCS TLS cert). Public, no pull secret required.
+ */
+export const UBI9_IMAGE = 'registry.access.redhat.com/ubi9/ubi:latest';
+
+/**
+ * In-cluster OpenShift CLI image — always present, version-matched to the cluster,
+ * pullable from any namespace with no pull secret. An initContainer copies its `oc`
+ * binary into a shared volume so the UBI9 runner can drive `oc`/`oc adm`.
+ */
+export const OC_CLI_IMAGE = 'image-registry.openshift-image-registry.svc:5000/openshift/cli:latest';
+
+// ---- Intel TDX remote attestation (Intel DCAP: PCCS + QGS) ----
+// Mirrors "Deploying confidential containers on bare-metal servers" §3.2,
+// "Deploying Intel TDX remote attestation".
+/** Namespace that holds the Intel DCAP remote-attestation infrastructure. */
+export const INTEL_DCAP_NAMESPACE = 'intel-dcap';
+/**
+ * sandboxed-containers-operator release tag whose install-helpers carry the pinned
+ * PCCS/QGS manifests. Matches OSC 1.12 (the version the bare-metal CoCo doc targets).
+ */
+export const OSC_DCAP_HELPERS_TAG = 'v1.12.0';
+/** Raw base URL for the pinned intel-dcap install helpers (pccs.yaml.in, qgs.yaml). */
+export const oscDcapHelpersBase = (tag: string = OSC_DCAP_HELPERS_TAG): string =>
+  `https://raw.githubusercontent.com/openshift/sandboxed-containers-operator/refs/tags/${tag}/scripts/install-helpers/baremetal-coco/intel-dcap`;
+/** Intel Trusted Services API portal — where the operator subscribes for the PCS API key. */
+export const INTEL_PCS_PORTAL_URL = 'https://api.portal.trustedservices.intel.com';
 
 // `kind~group~version` reference string for action/flag extensions.
 export const KataConfigModelRef = 'kataconfiguration.openshift.io~v1~KataConfig';

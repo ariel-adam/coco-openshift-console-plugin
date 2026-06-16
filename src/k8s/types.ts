@@ -116,6 +116,23 @@ export type DaemonSetKind = K8sResourceCommon & {
   };
 };
 
+/** A batch/v1 Job — we watch .status to drive automation progress. */
+export type JobKind = K8sResourceCommon & {
+  spec?: {
+    backoffLimit?: number;
+    template?: {
+      metadata?: Record<string, unknown>;
+      spec?: Record<string, unknown>;
+    };
+  };
+  status?: {
+    active?: number;
+    succeeded?: number;
+    failed?: number;
+    conditions?: { type: string; status: string; reason?: string; message?: string }[];
+  };
+};
+
 /** Confidential classification derived from a RuntimeClass (name + handler). */
 export type CcClass = 'confidential' | 'confidential-gpu' | 'peerpod' | 'sandbox' | 'unknown';
 

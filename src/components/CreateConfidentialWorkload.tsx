@@ -108,7 +108,7 @@ const SIDECAR_SCRIPT = [
   '  HTTP="$(curl -s -m 10 -o /tmp/resp -w \'%{http_code}\' "http://127.0.0.1:8006/cdh/resource/${CDH_PATH}" 2>/tmp/cerr)"; PRC=$?',
   '  if [ "$PRC" -ne 0 ]; then VERDICT=inconclusive; HTTP=000; elif [ "$HTTP" -ge 200 ] && [ "$HTTP" -lt 300 ]; then VERDICT=passed; else VERDICT=failed; fi',
   '  printf \'{"schema":"trustee.attestation.evidence/v1","source":"sidecar","timestamp":"%s","workload":{"namespace":"%s","name":"%s","uid":"%s","node":"%s","runtimeClassName":"%s","hasInitData":%s},"trustee":{"kbsEndpoint":"%s"},"probe":{"method":"in-guest sidecar CDH resource fetch","cdhPath":"%s","httpStatus":"%s","execExitCode":%s},"verdict":"%s"}\' "$TS" "$POD_NS" "$POD_NAME" "$POD_UID" "$NODE_NAME" "$RUNTIME" "$HAS_INITDATA" "$KBS_ENDPOINT" "$CDH_PATH" "$HTTP" "$PRC" "$VERDICT" > /tmp/ev.json',
-  '  ESC="$(sed -e \'s/\\\\/\\\\\\\\/g\' -e \'s/"/\\\\"/g\' /tmp/ev.json | tr -d \'\\n\')"',
+  "  ESC=\"$(sed -e 's/\\\\/\\\\\\\\/g' -e 's/\"/\\\\\"/g' /tmp/ev.json | tr -d '\\n')\"",
   '  printf \'{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"%s","labels":{"trustee.attestation/evidence":"true","trustee.attestation/pod":"%s"}},"data":{"evidence.json":"%s"}}\' "$CM_NAME" "$POD_NAME" "$ESC" > /tmp/cm.json',
   '  curl -sS --cacert "$CACERT" -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/apply-patch+yaml" -X PATCH "${API}/api/v1/namespaces/${POD_NS}/configmaps/${CM_NAME}?fieldManager=attestation-evidence-sidecar&force=true" --data-binary @/tmp/cm.json >/tmp/apply.out 2>/tmp/apply.err || true',
   '  sleep "${INTERVAL}"',
@@ -140,9 +140,9 @@ const CreateConfidentialWorkload: FC = () => {
   });
   const nsNames = useMemo(
     () =>
-      [
-        ...new Set((projects ?? []).map((n) => n.metadata?.name).filter(Boolean) as string[]),
-      ].sort((a, b) => a.localeCompare(b)),
+      [...new Set((projects ?? []).map((n) => n.metadata?.name).filter(Boolean) as string[])].sort(
+        (a, b) => a.localeCompare(b),
+      ),
     [projects],
   );
   const [nsOpen, setNsOpen] = useState(false);
@@ -179,8 +179,8 @@ const CreateConfidentialWorkload: FC = () => {
   const [helperImage, setHelperImage] = useState('');
   const [scOpen, setScOpen] = useState(false);
   // True once the user edits the PVC name, so we stop auto-deriving it from the workload name.
-  const pvcNameTouched = useRef(false);
-  const scTouched = useRef(false);
+  const [pvcNameTouched, setPvcNameTouched] = useState(false);
+  const [scTouched, setScTouched] = useState(false);
 
   // --- Attestation evidence sidecar (self-reporting, no exec) ---
   const [evidenceSidecar, setEvidenceSidecar] = useState(false);
@@ -210,9 +210,9 @@ const CreateConfidentialWorkload: FC = () => {
   }, [storageClasses, scNames]);
 
   // Default-select the cluster's default StorageClass once the list loads (unless the user chose one).
-  const effectiveSc = scTouched.current ? storageClass : storageClass || defaultSc;
+  const effectiveSc = scTouched ? storageClass : storageClass || defaultSc;
   // Default the PVC name from the workload name until the user overrides it.
-  const effectivePvcName = pvcNameTouched.current ? pvcName : pvcName || `${name.trim()}-enc`;
+  const effectivePvcName = pvcNameTouched ? pvcName : pvcName || `${name.trim()}-enc`;
 
   // The sidecar records which KBS it attested against. The KBS endpoint is baked
   // into the initdata (which the user pastes below), so it is left empty here —
@@ -682,7 +682,7 @@ const CreateConfidentialWorkload: FC = () => {
                           id="cw-pvc-name"
                           value={effectivePvcName}
                           onChange={(_e, v) => {
-                            pvcNameTouched.current = true;
+                            setPvcNameTouched(true);
                             setPvcName(v);
                           }}
                         />
@@ -701,7 +701,7 @@ const CreateConfidentialWorkload: FC = () => {
                           isOpen={scOpen}
                           selected={effectiveSc}
                           onSelect={(_e, value) => {
-                            scTouched.current = true;
+                            setScTouched(true);
                             setStorageClass(typeof value === 'string' ? value : '');
                             setScOpen(false);
                           }}

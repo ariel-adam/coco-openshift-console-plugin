@@ -152,4 +152,3 @@ export const useConfidentialWorkloads = (): { workloads: CcWorkload[]; loaded: b
 
   return { workloads, loaded: rcLoaded && podsLoaded && depLoaded };
 };
-

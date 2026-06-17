@@ -34,7 +34,7 @@ import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternf
 import type { ISortBy, OnSort } from '@patternfly/react-table';
 import type { FC } from 'react';
 import { Fragment, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom-v5-compat';
+import { useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useConfidentialWorkloads } from '../k8s/hooks';
 import {

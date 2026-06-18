@@ -143,6 +143,34 @@ export type JobKind = K8sResourceCommon & {
   };
 };
 
+/**
+ * machineconfiguration.openshift.io/v1 MachineConfigPool — we read the role label
+ * (to match a pool to the TDX-host MachineConfig), the rollout conditions
+ * (Updating/Updated), and the machine counts to show reboot progress.
+ */
+export type MachineConfigPoolKind = K8sResourceCommon & {
+  metadata?: K8sResourceCommon['metadata'] & { labels?: Record<string, string> };
+  spec?: {
+    machineConfigSelector?: {
+      matchLabels?: Record<string, string>;
+      matchExpressions?: { key: string; operator: string; values?: string[] }[];
+    };
+    nodeSelector?: { matchLabels?: Record<string, string> };
+  };
+  status?: {
+    machineCount?: number;
+    updatedMachineCount?: number;
+    readyMachineCount?: number;
+    degradedMachineCount?: number;
+    conditions?: {
+      type: string;
+      status: string;
+      reason?: string;
+      message?: string;
+    }[];
+  };
+};
+
 /** Confidential classification derived from a RuntimeClass (name + handler). */
 export type CcClass = 'confidential' | 'confidential-gpu' | 'peerpod' | 'sandbox' | 'unknown';
 

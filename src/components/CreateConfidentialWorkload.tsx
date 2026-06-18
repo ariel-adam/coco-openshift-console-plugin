@@ -15,6 +15,7 @@ import {
   Checkbox,
   CodeBlock,
   CodeBlockCode,
+  ExpandableSection,
   Form,
   FormGroup,
   FormHelperText,
@@ -35,12 +36,14 @@ import {
   TextInputGroup,
   TextInputGroupMain,
 } from '@patternfly/react-core';
+import { ExternalLinkAltIcon } from '@patternfly/react-icons';
 import type { FC, Ref } from 'react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import {
   CC_INIT_DATA_ANNOTATION,
+  ConfigMapGVK,
   DeploymentModel,
   EVIDENCE_SIDECAR_IMAGE,
   NamespaceModel,
@@ -50,9 +53,16 @@ import {
   RoleBindingModel,
   RoleModel,
   ServiceAccountModel,
+  SHARED_CONFIGMAP_SCHEMA_VERSION,
+  SHARED_INITDATA_DATA_KEY,
+  SHARED_INITDATA_KBS_URL_KEY,
+  SHARED_INITDATA_LABEL,
   StorageClassGVK,
 } from '../k8s/resources';
-import type { NamespaceKind, StorageClassKind } from '../k8s/types';
+import type { ConfigMapKind, NamespaceKind, StorageClassKind } from '../k8s/types';
+import { isValidCdhResourcePath } from '../utils/cdhPath';
+import { fnv1aHex } from '../utils/checksum';
+import { decodeInitdataKbsUrl, isInClusterKbsHost, kbsHostFromUrl } from '../utils/topology';
 import './coco.css';
 
 type Kind = 'Pod' | 'Deployment';
@@ -62,6 +72,9 @@ const CREATE_NS_SENTINEL = '__coco_create_namespace__';
 const IS_DEFAULT_SC_ANNOTATION = 'storageclass.kubernetes.io/is-default-class';
 /** Placeholder shown when no LUKS helper image is supplied — must be replaced by the user. */
 const LUKS_HELPER_PLACEHOLDER = '<luks-helper-image>';
+/** Docs for building the LUKS helper image (linked from the blocking Create message). */
+const LUKS_HELPER_DOCS_URL =
+  'https://docs.redhat.com/en/documentation/openshift_sandboxed_containers/1.12/html/deploying_confidential_containers/index';
 
 // --- Attestation evidence sidecar ---
 /**
@@ -90,7 +103,8 @@ const evidenceRbacName = (podName: string): string =>
  * not unpack there ("No space left on device"). Built as single-quoted lines so
  * every bash `${VAR}` stays literal; all user-supplied values arrive via the
  * container env (POD_NAME, POD_NS, POD_UID, NODE_NAME, RUNTIME, HAS_INITDATA,
- * CDH_PATH, INTERVAL, CM_NAME, KBS_ENDPOINT), never via JS string interpolation.
+ * CDH_PATH, INTERVAL, CM_NAME, KBS_ENDPOINT, SCHEMA_VERSION), never via JS string
+ * interpolation.
  * Each loop iteration:
  *   1. probes the Confidential Data Hub for a KBS resource (released only after a
  *      successful in-guest attestation) and maps the curl exit code to a verdict,
@@ -109,7 +123,7 @@ const SIDECAR_SCRIPT = [
   '  if [ "$PRC" -ne 0 ]; then VERDICT=inconclusive; HTTP=000; elif [ "$HTTP" -ge 200 ] && [ "$HTTP" -lt 300 ]; then VERDICT=passed; else VERDICT=failed; fi',
   '  printf \'{"schema":"trustee.attestation.evidence/v1","source":"sidecar","timestamp":"%s","workload":{"namespace":"%s","name":"%s","uid":"%s","node":"%s","runtimeClassName":"%s","hasInitData":%s},"trustee":{"kbsEndpoint":"%s"},"probe":{"method":"in-guest sidecar CDH resource fetch","cdhPath":"%s","httpStatus":"%s","execExitCode":%s},"verdict":"%s"}\' "$TS" "$POD_NS" "$POD_NAME" "$POD_UID" "$NODE_NAME" "$RUNTIME" "$HAS_INITDATA" "$KBS_ENDPOINT" "$CDH_PATH" "$HTTP" "$PRC" "$VERDICT" > /tmp/ev.json',
   "  ESC=\"$(sed -e 's/\\\\/\\\\\\\\/g' -e 's/\"/\\\\\"/g' /tmp/ev.json | tr -d '\\n')\"",
-  '  printf \'{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"%s","labels":{"trustee.attestation/evidence":"true","trustee.attestation/pod":"%s"}},"data":{"evidence.json":"%s"}}\' "$CM_NAME" "$POD_NAME" "$ESC" > /tmp/cm.json',
+  '  printf \'{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"%s","labels":{"trustee.attestation/evidence":"true","trustee.attestation/pod":"%s"}},"data":{"schema":"%s","evidence.json":"%s"}}\' "$CM_NAME" "$POD_NAME" "$SCHEMA_VERSION" "$ESC" > /tmp/cm.json',
   '  curl -sS --cacert "$CACERT" -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/apply-patch+yaml" -X PATCH "${API}/api/v1/namespaces/${POD_NS}/configmaps/${CM_NAME}?fieldManager=attestation-evidence-sidecar&force=true" --data-binary @/tmp/cm.json >/tmp/apply.out 2>/tmp/apply.err || true',
   '  sleep "${INTERVAL}"',
   'done',
@@ -219,12 +233,84 @@ const CreateConfidentialWorkload: FC = () => {
   // the probe still works via the CDH.
   const kbsEndpoint = '';
 
+  // --- Same-cluster shared-initdata picker (optional convenience) ---
+  // Trustee, when co-located on THIS cluster, labels a `<tc>-shared-initdata`
+  // ConfigMap with `trustee.attestation/shared-initdata` and puts the ready-to-paste
+  // cc_init_data value in its data. We watch those in the selected namespace and
+  // offer them as a one-click fill. This is never required: the attestation service
+  // is commonly on another cluster (hub-spoke) or not Trustee, so manual paste stays
+  // the primary path.
+  const [sharedInitdataCms] = useK8sWatchResource<ConfigMapKind[]>(
+    nsTrimmed
+      ? {
+          groupVersionKind: ConfigMapGVK,
+          namespace: nsTrimmed,
+          isList: true,
+          selector: { matchLabels: { [SHARED_INITDATA_LABEL]: 'true' } },
+        }
+      : null,
+  );
+  const sharedInitdataOptions = useMemo(
+    () =>
+      (sharedInitdataCms ?? [])
+        .map((cm) => ({
+          name: cm.metadata?.name ?? '',
+          value: cm.data?.[SHARED_INITDATA_DATA_KEY] ?? '',
+          kbsUrl: cm.data?.[SHARED_INITDATA_KBS_URL_KEY] ?? '',
+        }))
+        .filter((o) => o.name !== '' && o.value !== '')
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [sharedInitdataCms],
+  );
+  const [sharedPickerOpen, setSharedPickerOpen] = useState(false);
+
+  // --- Initdata reachability (warn-only): decode the pasted KBS host ---
+  // Decoding gzip+base64 in the browser is async, so we cache the async result
+  // *tagged with the exact input it was decoded from* and never call setState
+  // synchronously in the effect. The displayed host is then DERIVED: it counts only
+  // when the cached tag still matches the current paste, so an empty or changed
+  // paste clears the warning without a synchronous state write.
+  const trimmedInitdata = initdata.trim();
+  const [decoded, setDecoded] = useState<{ input: string; host: string | null }>({
+    input: '',
+    host: null,
+  });
+  useEffect(() => {
+    if (trimmedInitdata === '') return;
+    let cancelled = false;
+    void decodeInitdataKbsUrl(trimmedInitdata).then((url) => {
+      if (!cancelled)
+        setDecoded({ input: trimmedInitdata, host: url ? kbsHostFromUrl(url) : null });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [trimmedInitdata]);
+  // Derived: the decoded host only applies to the current paste.
+  const decodedKbsHost =
+    trimmedInitdata !== '' && decoded.input === trimmedInitdata ? decoded.host : null;
+  const kbsUnreachableWarn = decodedKbsHost !== null && isInClusterKbsHost(decodedKbsHost);
+
+  // --- Inline validation that gates Create ---
+  // CDH resource path must be exactly <repository>/<name>/<key> (3 segments); a
+  // 2-segment folder path silently 404s at runtime. Only enforced when the sidecar
+  // is enabled.
+  const cdhPathValid = isValidCdhResourcePath(evidenceCdhPath);
+  // The LUKS helper image must be a real image — the placeholder/empty value would
+  // "succeed" at Create then fail at container start. Only enforced when encryption
+  // is enabled.
+  const helperImageTrimmed = helperImage.trim();
+  const luksHelperMissing =
+    enc && (helperImageTrimmed === '' || helperImageTrimmed === LUKS_HELPER_PLACEHOLDER);
+
   const valid =
     name.trim() !== '' &&
     nsTrimmed !== '' &&
     image.trim() !== '' &&
     initdata.trim() !== '' &&
-    (!enc || (effectivePvcName.trim() !== '' && pvcSize.trim() !== ''));
+    (!enc || (effectivePvcName.trim() !== '' && pvcSize.trim() !== '')) &&
+    !luksHelperMissing &&
+    (!evidenceSidecar || cdhPathValid);
 
   const buildPvc = (): K8sResourceCommon =>
     ({
@@ -342,6 +428,7 @@ const CreateConfidentialWorkload: FC = () => {
             { name: 'INTERVAL', value: evidenceInterval.trim() || '60' },
             { name: 'CM_NAME', value: evidenceCmName(podName) },
             { name: 'KBS_ENDPOINT', value: kbsEndpoint },
+            { name: 'SCHEMA_VERSION', value: SHARED_CONFIGMAP_SCHEMA_VERSION },
           ],
         }
       : undefined;
@@ -382,10 +469,12 @@ const CreateConfidentialWorkload: FC = () => {
     } as K8sResourceCommon;
   };
 
-  const trimmedInitdata = initdata.trim();
+  // Fingerprint of the pasted initdata so the user can verify a multi-KB paste
+  // landed intact (FNV-1a; a copy-paste hint, not a security control).
+  const initdataChecksum = trimmedInitdata ? fnv1aHex(trimmedInitdata) : '';
   const previewInitdata =
     trimmedInitdata.length > 80
-      ? `${trimmedInitdata.slice(0, 80)}… (${trimmedInitdata.length} chars)`
+      ? `${trimmedInitdata.slice(0, 80)}… (${trimmedInitdata.length} chars, fnv1a ${initdataChecksum})`
       : trimmedInitdata;
   const workloadPreview = JSON.stringify(buildManifest(previewInitdata), null, 2);
   // Show every additional object that gets created above the workload (PVC for the
@@ -642,6 +731,54 @@ const CreateConfidentialWorkload: FC = () => {
                     isRequired
                     fieldId="cw-initdata"
                   >
+                    {sharedInitdataOptions.length > 0 && (
+                      <div className="coco-openshift-console-plugin__mb">
+                        <Select
+                          isOpen={sharedPickerOpen}
+                          onSelect={(_e, value) => {
+                            const picked = sharedInitdataOptions.find((o) => o.name === value);
+                            if (picked) setInitdata(picked.value);
+                            setSharedPickerOpen(false);
+                          }}
+                          onOpenChange={(isOpen) => {
+                            setSharedPickerOpen(isOpen);
+                          }}
+                          toggle={(toggleRef: Ref<MenuToggleElement>) => (
+                            <MenuToggle
+                              id="cw-initdata-shared"
+                              ref={toggleRef}
+                              isExpanded={sharedPickerOpen}
+                              onClick={() => {
+                                setSharedPickerOpen(!sharedPickerOpen);
+                              }}
+                            >
+                              {t('Use initdata from Trustee on this cluster')}
+                            </MenuToggle>
+                          )}
+                        >
+                          <SelectList>
+                            {sharedInitdataOptions.map((o) => (
+                              <SelectOption
+                                key={o.name}
+                                value={o.name}
+                                description={
+                                  o.kbsUrl ? t('KBS: {{url}}', { url: o.kbsUrl }) : undefined
+                                }
+                              >
+                                {o.name}
+                              </SelectOption>
+                            ))}
+                          </SelectList>
+                        </Select>
+                        <HelperText>
+                          <HelperTextItem>
+                            {t(
+                              'Optional: a Trustee co-located on this cluster shared these initdata ConfigMaps in this namespace. Picking one fills the field below; you can still edit or paste your own.',
+                            )}
+                          </HelperTextItem>
+                        </HelperText>
+                      </div>
+                    )}
                     <TextArea
                       id="cw-initdata"
                       value={initdata}
@@ -655,11 +792,37 @@ const CreateConfidentialWorkload: FC = () => {
                       <HelperText>
                         <HelperTextItem>
                           {t(
-                            'Paste the initdata your Trustee admin shared with you — the cc_init_data value they generated on the Trustee, whether it runs in this cluster or a remote one. Without it the workload cannot attest.',
+                            'Initdata comes from your attestation service (e.g. Trustee), generated against the KBS your workload will attest to. It can run on this cluster or a remote one (hub-and-spoke). Without it the workload cannot attest.',
                           )}
                         </HelperTextItem>
                       </HelperText>
                     </FormHelperText>
+                    {kbsUnreachableWarn && (
+                      <Alert
+                        variant="warning"
+                        isInline
+                        title={t('This initdata points at an in-cluster KBS')}
+                        className="coco-openshift-console-plugin__mt"
+                      >
+                        {t(
+                          'The pasted initdata attests to {{host}}, an in-cluster Service name that only resolves on the cluster that hosts it. If this workload runs on a different (spoke or air-gapped) cluster it cannot reach that KBS and will fail to attest at runtime. Use the attestation service’s external Route URL for cross-cluster workloads. You can still create the workload.',
+                          { host: decodedKbsHost ?? '' },
+                        )}
+                      </Alert>
+                    )}
+                    {trimmedInitdata !== '' && (
+                      <ExpandableSection
+                        toggleText={t('Verify pasted initdata ({{count}} chars, fnv1a {{sum}})', {
+                          count: trimmedInitdata.length,
+                          sum: initdataChecksum,
+                        })}
+                        className="coco-openshift-console-plugin__mt"
+                      >
+                        <CodeBlock>
+                          <CodeBlockCode>{trimmedInitdata}</CodeBlockCode>
+                        </CodeBlock>
+                      </ExpandableSection>
+                    )}
                   </FormGroup>
 
                   <FormGroup fieldId="cw-enc">
@@ -762,22 +925,43 @@ const CreateConfidentialWorkload: FC = () => {
                           </HelperTextItem>
                         </HelperText>
                       </FormGroup>
-                      <FormGroup label={t('LUKS helper image')} fieldId="cw-helper-image">
+                      <FormGroup
+                        label={t('LUKS helper image')}
+                        isRequired
+                        fieldId="cw-helper-image"
+                      >
                         <TextInput
                           id="cw-helper-image"
                           value={helperImage}
                           placeholder={LUKS_HELPER_PLACEHOLDER}
+                          validated={luksHelperMissing ? 'error' : 'default'}
                           onChange={(_e, v) => {
                             setHelperImage(v);
                           }}
                         />
                         <HelperText>
-                          <HelperTextItem>
-                            {t(
-                              'Image whose init container opens the LUKS device with the passphrase on boot — see the OpenShift sandboxed containers LUKS-in-TEE docs.',
-                            )}
+                          <HelperTextItem variant={luksHelperMissing ? 'error' : 'default'}>
+                            {luksHelperMissing
+                              ? t(
+                                  'A real LUKS helper image is required — the placeholder is not a usable image, and leaving it would let Create succeed and then fail at container start. Build/supply an image whose init container opens the LUKS device with the passphrase on boot.',
+                                )
+                              : t(
+                                  'Image whose init container opens the LUKS device with the passphrase on boot.',
+                                )}
                           </HelperTextItem>
                         </HelperText>
+                        <Button
+                          variant="link"
+                          isInline
+                          component="a"
+                          href={LUKS_HELPER_DOCS_URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          icon={<ExternalLinkAltIcon />}
+                          iconPosition="end"
+                        >
+                          {t('LUKS-in-TEE documentation')}
+                        </Button>
                       </FormGroup>
                     </>
                   )}
@@ -821,19 +1005,28 @@ const CreateConfidentialWorkload: FC = () => {
                           )}
                         </p>
                       </Alert>
-                      <FormGroup label={t('CDH resource path')} fieldId="cw-evidence-cdh">
+                      <FormGroup
+                        label={t('CDH resource path')}
+                        isRequired
+                        fieldId="cw-evidence-cdh"
+                      >
                         <TextInput
                           id="cw-evidence-cdh"
                           value={evidenceCdhPath}
+                          validated={cdhPathValid ? 'default' : 'error'}
                           onChange={(_e, v) => {
                             setEvidenceCdhPath(v);
                           }}
                         />
                         <HelperText>
-                          <HelperTextItem>
-                            {t(
-                              'A KBS resource the guest fetches as proof it attested — released only after a successful attestation. Use the full path <repository>/<name>/<key>, e.g. default/kbsres1/key1. A two-segment path like default/kbsres1 is a folder, not a resource, and returns 404.',
-                            )}
+                          <HelperTextItem variant={cdhPathValid ? 'default' : 'error'}>
+                            {cdhPathValid
+                              ? t(
+                                  'A KBS resource the guest fetches as proof it attested — released only after a successful attestation. Use the full path <repository>/<name>/<key>, e.g. default/kbsres1/key1.',
+                                )
+                              : t(
+                                  'Enter the full path <repository>/<name>/<key> (3 segments), e.g. default/kbsres1/key1. A two-segment path like default/kbsres1 is a folder, not a resource, and returns 404.',
+                                )}
                           </HelperTextItem>
                         </HelperText>
                       </FormGroup>

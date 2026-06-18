@@ -128,6 +128,42 @@ export const classifyKbsUrl = (kbsUrl: string, localServiceName: string): Attest
   return { target: local ? 'local' : 'remote', host };
 };
 
+/** Extract just the host (no port) from a KBS URL, tolerating a bare host string. */
+export const kbsHostFromUrl = (kbsUrl: string): string => {
+  const raw = kbsUrl.trim();
+  // Only trust the URL parser when there is a real `scheme://authority`. A bare
+  // `host:port` (e.g. "kbs-service.trustee.svc:8080") is wrongly parsed by `new
+  // URL` as scheme `kbs-service.trustee.svc:` with an empty hostname, so we must
+  // not route it through the parser.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).hostname;
+    } catch {
+      /* fall through to manual stripping */
+    }
+  }
+  // Strip any scheme, path, and port so the caller still gets a comparable host.
+  return raw
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+    .split('/')[0]
+    .split(':')[0]
+    .trim();
+};
+
+/**
+ * Is this KBS host an in-cluster Kubernetes Service DNS name (`*.svc` or
+ * `*.svc.cluster.local`)? Such a name only resolves inside the cluster that owns
+ * the Service, so a workload running on a spoke or air-gapped cluster cannot reach
+ * it — the pod starts but silently fails to attest at runtime (visible only in the
+ * in-guest CDH probe). This drives a warn-only hint on the initdata field; it never
+ * blocks Create, because same-cluster Trustee is a supported topology.
+ */
+export const isInClusterKbsHost = (kbsUrl: string): boolean => {
+  const host = kbsHostFromUrl(kbsUrl).toLowerCase();
+  if (host === '') return false;
+  return host.endsWith('.svc') || host.endsWith('.svc.cluster.local');
+};
+
 // ---- model ----
 
 /** Build the live (this-cluster) topology model from confidential pods + nodes. */

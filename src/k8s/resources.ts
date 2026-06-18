@@ -66,6 +66,17 @@ export const MachineConfigGVK: K8sGroupVersionKind = {
   kind: 'MachineConfig',
 };
 
+/**
+ * machineconfiguration.openshift.io/v1 MachineConfigPool — watched to track the
+ * rolling reboot a TDX-host MachineConfig triggers (Updating → Updated) instead of
+ * declaring success the moment the CR is created.
+ */
+export const MachineConfigPoolGVK: K8sGroupVersionKind = {
+  group: 'machineconfiguration.openshift.io',
+  version: 'v1',
+  kind: 'MachineConfigPool',
+};
+
 export const NodeFeatureRuleModel: K8sModel = {
   apiGroup: 'nfd.openshift.io',
   apiVersion: 'v1alpha1',
@@ -280,6 +291,39 @@ export const CC_INIT_DATA_ANNOTATION = 'io.katacontainers.config.hypervisor.cc_i
  */
 export const KBS_SERVICE_NAME = 'kbs-service';
 export const KBS_SERVICE_PORT = 8080;
+
+// ---- Cross-plugin ConfigMap contracts (CoCo ⇄ Trustee) ----
+// CoCo and Trustee ship in two independently-versioned operators but exchange data
+// through two label-selected ConfigMap conventions. To guard against operator skew,
+// each plugin stamps a `schema` data field with this shared version and tolerates a
+// missing/older value when reading. Bump only on a breaking shape change.
+/** Shared schema/version stamped on the cross-plugin ConfigMaps. */
+export const SHARED_CONFIGMAP_SCHEMA_VERSION = '1';
+/** Data key carrying the schema/version on a cross-plugin ConfigMap. */
+export const SHARED_CONFIGMAP_SCHEMA_KEY = 'schema';
+
+/**
+ * Initdata-sharing contract (Trustee writes, CoCo optionally reads on the SAME
+ * cluster). Trustee labels a `<tc>-shared-initdata` ConfigMap with this label and
+ * puts the ready-to-paste `cc_init_data` value (plus the KBS URL and PCR8) in its
+ * data. CoCo's create form offers these as an optional initdata source when one is
+ * present in the selected namespace — never required, because the attestation
+ * service is commonly on another cluster (hub-spoke) or not Trustee at all.
+ */
+export const SHARED_INITDATA_LABEL = 'trustee.attestation/shared-initdata';
+/** Data key on a shared-initdata ConfigMap holding the gzip+base64 cc_init_data value. */
+export const SHARED_INITDATA_DATA_KEY = 'cc_init_data';
+/** Data key on a shared-initdata ConfigMap holding the KBS URL (for display only). */
+export const SHARED_INITDATA_KBS_URL_KEY = 'kbs-url';
+
+/**
+ * Evidence contract (CoCo's in-guest sidecar writes, Trustee reads). The sidecar
+ * server-side-applies an `attestation-evidence-*` ConfigMap labeled with this label;
+ * Trustee reads it by selector in its Attestation status view. Defined here so the
+ * GVK/label live next to the initdata contract; the sidecar script and the
+ * evidence-reader (`utils/evidence.ts`) use the same literal.
+ */
+export const EVIDENCE_LABEL = 'trustee.attestation/evidence';
 
 /**
  * coco-tools image — ships bash, oc, curl, and python3. Kept for tooling that

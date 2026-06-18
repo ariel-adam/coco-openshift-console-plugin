@@ -9,8 +9,10 @@
 // only READS that ConfigMap; no exec, no privileged probe.
 // ---------------------------------------------------------------------------
 
-/** Label the sidecar stamps on its evidence ConfigMap (value "true"). */
-export const EVIDENCE_LABEL = 'trustee.attestation/evidence';
+// The evidence label is part of the cross-plugin ConfigMap contract and lives with
+// the other contract constants in k8s/resources; re-export it here so existing
+// readers keep importing it from utils/evidence (single source of truth).
+export { EVIDENCE_LABEL, SHARED_CONFIGMAP_SCHEMA_VERSION } from '../k8s/resources';
 /** Label carrying the reporting pod name. */
 export const EVIDENCE_POD_LABEL = 'trustee.attestation/pod';
 

@@ -8,6 +8,10 @@ import {
   DescriptionListDescription,
   DescriptionListGroup,
   DescriptionListTerm,
+  EmptyState,
+  EmptyStateActions,
+  EmptyStateBody,
+  EmptyStateFooter,
   Flex,
   FlexItem,
   Grid,
@@ -37,6 +41,7 @@ import { NodeGVK, RuntimeClassGVK } from '../k8s/resources';
 import { ccClassLabel, classForRuntimeClass, isConfidentialRuntimeClass } from '../utils/runtime';
 import { kataInstallSummary, statusCategory } from '../utils/status';
 import { teeLabel } from '../utils/tee';
+import { EnableConfidentialContainers } from './EnableConfidentialContainers';
 import './coco.css';
 
 const StatTile: FC<{
@@ -177,6 +182,38 @@ const ConfidentialContainersOverview: FC = () => {
       <ListPageHeader title={t('Confidential containers overview')} />
 
       <PageSection>
+        {/* Feature-gate empty-state: the Confidential Containers menu is gated on
+            KataConfig, so it can appear before confidential containers is turned on
+            (osc-feature-gates confidential!=true). When the gate is off, surface the
+            one-click enable action up front. This is purely the OSC feature gate — no
+            attestation-service/Trustee detection, by design. */}
+        {ccEnabledLoaded && ccEnabled === false && (
+          <Card className="coco-openshift-console-plugin__mb">
+            <CardBody>
+              <EmptyState
+                headingLevel="h4"
+                icon={ExclamationTriangleIcon}
+                titleText={t('Confidential containers are not enabled yet')}
+              >
+                <EmptyStateBody>
+                  {t(
+                    'The Confidential Containers menu is available because sandboxed containers (KataConfig) is installed, but the confidential feature is still off. Enabling it sets confidential: "true" on the osc-feature-gates ConfigMap, so the OpenShift sandboxed containers operator installs the kata-cc runtime on your TEE nodes. This reboots the sandboxed-containers nodes, one at a time.',
+                  )}
+                </EmptyStateBody>
+                <EmptyStateFooter>
+                  <EmptyStateActions>
+                    <EnableConfidentialContainers />
+                    <Link to="/confidential-containers/setup">
+                      <Button variant="link" icon={<ArrowRightIcon />} iconPosition="end">
+                        {t('Open the setup checklist')}
+                      </Button>
+                    </Link>
+                  </EmptyStateActions>
+                </EmptyStateFooter>
+              </EmptyState>
+            </CardBody>
+          </Card>
+        )}
         <Grid hasGutter>
           <GridItem span={3}>
             <StatTile

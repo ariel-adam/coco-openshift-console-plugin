@@ -1,4 +1,9 @@
-import { classifyKbsUrl, isInClusterKbsHost, kbsHostFromUrl } from './topology';
+import {
+  classifyInitdataToml,
+  classifyKbsUrl,
+  isInClusterKbsHost,
+  kbsHostFromUrl,
+} from './topology';
 
 describe('kbsHostFromUrl', () => {
   it('extracts the hostname from a full URL (dropping scheme/port/path)', () => {
@@ -59,5 +64,45 @@ describe('classifyKbsUrl (existing local/remote split)', () => {
 
   it('classifies a different host as remote', () => {
     expect(classifyKbsUrl('https://kbs.apps.hub.example.com', 'kbs-service').target).toBe('remote');
+  });
+});
+
+describe('classifyInitdataToml', () => {
+  const withUrl = (url: string, cert = false): string =>
+    `algorithm = "sha256"\n[data]\n"cdh.toml" = '''\n[kbc]\nname = 'cc_kbc'\nurl = '${url}'\n${
+      cert
+        ? 'kbs_cert = """\n-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----\n"""\n'
+        : ''
+    }'''\n`;
+
+  it('flags an https KBS that pins no certificate (the rustls footgun)', () => {
+    const i = classifyInitdataToml(withUrl('https://kbs.apps.hub.example.com'));
+    expect(i).toMatchObject({ ok: true, scheme: 'https', hasCert: false });
+    expect(i.kbsUrl).toBe('https://kbs.apps.hub.example.com');
+  });
+
+  it('accepts an https KBS with a pinned cert', () => {
+    expect(classifyInitdataToml(withUrl('https://kbs.apps.hub.example.com', true))).toMatchObject({
+      ok: true,
+      scheme: 'https',
+      hasCert: true,
+    });
+  });
+
+  it('treats a plain-http KBS as ok with no cert needed', () => {
+    expect(classifyInitdataToml(withUrl('http://35.0.0.1:8080'))).toMatchObject({
+      ok: true,
+      scheme: 'http',
+      hasCert: false,
+    });
+  });
+
+  it('marks a value that is not an initdata.toml as not ok', () => {
+    expect(classifyInitdataToml('just some pasted text')).toEqual({
+      ok: false,
+      kbsUrl: null,
+      scheme: null,
+      hasCert: false,
+    });
   });
 });

@@ -62,7 +62,8 @@ import {
 import type { ConfigMapKind, NamespaceKind, StorageClassKind } from '../k8s/types';
 import { isValidCdhResourcePath } from '../utils/cdhPath';
 import { fnv1aHex } from '../utils/checksum';
-import { decodeInitdataKbsUrl, isInClusterKbsHost, kbsHostFromUrl } from '../utils/topology';
+import { inspectInitdata, isInClusterKbsHost, kbsHostFromUrl } from '../utils/topology';
+import type { InitdataInspection } from '../utils/topology';
 import './coco.css';
 
 type Kind = 'Pod' | 'Deployment';
@@ -271,25 +272,28 @@ const CreateConfidentialWorkload: FC = () => {
   // when the cached tag still matches the current paste, so an empty or changed
   // paste clears the warning without a synchronous state write.
   const trimmedInitdata = initdata.trim();
-  const [decoded, setDecoded] = useState<{ input: string; host: string | null }>({
+  const [decoded, setDecoded] = useState<{ input: string; insp: InitdataInspection | null }>({
     input: '',
-    host: null,
+    insp: null,
   });
   useEffect(() => {
     if (trimmedInitdata === '') return;
     let cancelled = false;
-    void decodeInitdataKbsUrl(trimmedInitdata).then((url) => {
-      if (!cancelled)
-        setDecoded({ input: trimmedInitdata, host: url ? kbsHostFromUrl(url) : null });
+    void inspectInitdata(trimmedInitdata).then((insp) => {
+      if (!cancelled) setDecoded({ input: trimmedInitdata, insp });
     });
     return () => {
       cancelled = true;
     };
   }, [trimmedInitdata]);
-  // Derived: the decoded host only applies to the current paste.
-  const decodedKbsHost =
-    trimmedInitdata !== '' && decoded.input === trimmedInitdata ? decoded.host : null;
+  // Derived: the inspection only applies to the current paste.
+  const insp = trimmedInitdata !== '' && decoded.input === trimmedInitdata ? decoded.insp : null;
+  const decodedKbsHost = insp?.kbsUrl ? kbsHostFromUrl(insp.kbsUrl) : null;
   const kbsUnreachableWarn = decodedKbsHost !== null && isInClusterKbsHost(decodedKbsHost);
+  // Decoded but not a recognizable initdata.toml (corrupt or wrong value pasted).
+  const initdataInvalidWarn = insp !== null && !insp.ok;
+  // An https KBS with no cert pinned: the in-guest agent (rustls) cannot validate it.
+  const httpsNoCertWarn = insp?.scheme === 'https' && !insp.hasCert;
 
   // --- Inline validation that gates Create ---
   // CDH resource path must be exactly <repository>/<name>/<key> (3 segments); a
@@ -807,6 +811,30 @@ const CreateConfidentialWorkload: FC = () => {
                         {t(
                           'The pasted initdata attests to {{host}}, an in-cluster Service name that only resolves on the cluster that hosts it. If this workload runs on a different (spoke or air-gapped) cluster it cannot reach that KBS and will fail to attest at runtime. Use the attestation service’s external Route URL for cross-cluster workloads. You can still create the workload.',
                           { host: decodedKbsHost ?? '' },
+                        )}
+                      </Alert>
+                    )}
+                    {initdataInvalidWarn && (
+                      <Alert
+                        variant="warning"
+                        isInline
+                        title={t('This doesn’t look like valid initdata')}
+                        className="coco-openshift-console-plugin__mt"
+                      >
+                        {t(
+                          'The pasted value didn’t decode to an initdata.toml — it should be the gzip+base64 cc_init_data your attestation service produced. Check that you copied the whole value. You can still create the workload, but it will not attest.',
+                        )}
+                      </Alert>
+                    )}
+                    {httpsNoCertWarn && (
+                      <Alert
+                        variant="warning"
+                        isInline
+                        title={t('HTTPS KBS with no certificate pinned')}
+                        className="coco-openshift-console-plugin__mt"
+                      >
+                        {t(
+                          'This initdata uses an https:// KBS URL but pins no certificate. The in-guest Confidential Data Hub validates the KBS against the certificate baked into initdata, so without one it cannot establish TLS and the workload fails to attest. Regenerate the initdata with the KBS certificate, or point it at the plain-http KBS endpoint. You can still create the workload.',
                         )}
                       </Alert>
                     )}

@@ -99,22 +99,63 @@ export const truncate = (s: string, n: number): string =>
 
 // ---- attestation target (decode the pod's initdata) ----
 
+/** What an in-browser decode of a pasted cc_init_data annotation tells us. */
+export interface InitdataInspection {
+  /** Decoded to something that looks like an initdata.toml (has [data] + cdh.toml). */
+  ok: boolean;
+  /** The first KBS `url = '...'` found (aa.toml/cdh.toml share it), or null. */
+  kbsUrl: string | null;
+  /** Scheme of kbsUrl. */
+  scheme: 'http' | 'https' | 'other' | null;
+  /** A `kbs_cert` is pinned in the initdata — required to validate an https KBS. */
+  hasCert: boolean;
+}
+
+const EMPTY_INSPECTION: InitdataInspection = {
+  ok: false,
+  kbsUrl: null,
+  scheme: null,
+  hasCert: false,
+};
+
+/** Classify an already-decoded initdata.toml. Pure (no browser APIs) so it is unit-testable. */
+export const classifyInitdataToml = (toml: string): InitdataInspection => {
+  const ok = toml.includes('[data]') && toml.includes('cdh.toml');
+  const m = /url\s*=\s*['"]([^'"]+)['"]/.exec(toml);
+  const kbsUrl = m ? m[1].trim() : null;
+  const scheme: InitdataInspection['scheme'] = !kbsUrl
+    ? null
+    : /^https:\/\//i.test(kbsUrl)
+      ? 'https'
+      : /^http:\/\//i.test(kbsUrl)
+        ? 'http'
+        : 'other';
+  return { ok, kbsUrl, scheme, hasCert: /kbs_cert\s*=/.test(toml) };
+};
+
 /**
- * Decode the KBS URL out of a pod's `cc_init_data` annotation (gzip+base64 of an
- * initdata.toml) in the browser. Returns null if absent/undecodable.
+ * Decode + inspect a pasted cc_init_data annotation (gzip+base64 of initdata.toml) in
+ * the browser. Returns an empty inspection (ok=false) when it does not decode — which
+ * the Create form surfaces as "this doesn't look like valid initdata".
  */
-export const decodeInitdataKbsUrl = async (annotation: string): Promise<string | null> => {
+export const inspectInitdata = async (annotation: string): Promise<InitdataInspection> => {
   try {
     const bin = atob(annotation.trim());
     const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
     const toml = await new Response(stream).text();
-    const m = /url\s*=\s*['"]([^'"]+)['"]/.exec(toml);
-    return m ? m[1].trim() : null;
+    return classifyInitdataToml(toml);
   } catch {
-    return null;
+    return EMPTY_INSPECTION;
   }
 };
+
+/**
+ * Decode the KBS URL out of a pod's `cc_init_data` annotation. Returns null if
+ * absent/undecodable. Thin wrapper over inspectInitdata for existing callers.
+ */
+export const decodeInitdataKbsUrl = async (annotation: string): Promise<string | null> =>
+  (await inspectInitdata(annotation)).kbsUrl;
 
 /** Is this KBS URL an in-cluster Trustee (kbs-service) or a remote one? */
 export const classifyKbsUrl = (kbsUrl: string, localServiceName: string): AttestInfo => {

@@ -107,30 +107,33 @@ const RowActions: FC<{
   );
 };
 
-const SkeletonTable: FC = () => (
-  <Table aria-label="Loading" variant="compact">
-    <Thead>
-      <Tr>
-        {Array.from({ length: 10 }, (_, i) => (
-          <Th key={i}>
-            <Skeleton width="5rem" />
-          </Th>
-        ))}
-      </Tr>
-    </Thead>
-    <Tbody>
-      {Array.from({ length: 5 }, (_, i) => (
-        <Tr key={i}>
-          {Array.from({ length: 10 }, (_, j) => (
-            <Td key={j}>
-              <Skeleton width={j === 0 ? '10rem' : '6rem'} />
-            </Td>
+const SkeletonTable: FC = () => {
+  const { t } = useTranslation('plugin__coco-openshift-console-plugin');
+  return (
+    <Table aria-label={t('Loading')} variant="compact">
+      <Thead>
+        <Tr>
+          {Array.from({ length: 10 }, (_, i) => (
+            <Th key={i}>
+              <Skeleton width="5rem" />
+            </Th>
           ))}
         </Tr>
-      ))}
-    </Tbody>
-  </Table>
-);
+      </Thead>
+      <Tbody>
+        {Array.from({ length: 5 }, (_, i) => (
+          <Tr key={i}>
+            {Array.from({ length: 10 }, (_, j) => (
+              <Td key={j}>
+                <Skeleton width={j === 0 ? '10rem' : '6rem'} />
+              </Td>
+            ))}
+          </Tr>
+        ))}
+      </Tbody>
+    </Table>
+  );
+};
 
 const ConfidentialWorkloadsList: FC = () => {
   const { t } = useTranslation('plugin__coco-openshift-console-plugin');

@@ -123,12 +123,25 @@ const AttestationTopology: FC = () => {
     const { node } = ln;
     const tee = teeShort(node.tee);
     const clickable = node.known && node.name !== '';
+    const openNode = () => void navigate(`/k8s/cluster/nodes/${node.name}`);
     return (
       <g
         key={`node-${node.name || 'unscheduled'}`}
         className={clickable ? `${PREFIX}__topo-clickable` : undefined}
-        onClick={clickable ? () => void navigate(`/k8s/cluster/nodes/${node.name}`) : undefined}
+        onClick={clickable ? openNode : undefined}
+        onKeyDown={
+          clickable
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  if (e.key === ' ') e.preventDefault();
+                  openNode();
+                }
+              }
+            : undefined
+        }
         role={clickable ? 'button' : undefined}
+        tabIndex={clickable ? 0 : undefined}
+        aria-label={clickable ? t('Open node {{name}}', { name: node.name }) : undefined}
       >
         <rect
           x={ln.x}
@@ -197,12 +210,24 @@ const AttestationTopology: FC = () => {
           : wl.attest === 'none'
             ? t('no initdata — does not attest')
             : t('decoding initdata…');
+    const openWorkload = () => void navigate(`/k8s/ns/${wl.namespace}/pods/${wl.name}`);
     return (
       <g
         key={wl.uid}
         className={`${PREFIX}__topo-clickable`}
-        onClick={() => void navigate(`/k8s/ns/${wl.namespace}/pods/${wl.name}`)}
+        onClick={openWorkload}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            if (e.key === ' ') e.preventDefault();
+            openWorkload();
+          }
+        }}
         role="button"
+        tabIndex={0}
+        aria-label={t('Open workload {{namespace}}/{{name}}', {
+          namespace: wl.namespace,
+          name: wl.name,
+        })}
       >
         <rect
           x={lw.x}

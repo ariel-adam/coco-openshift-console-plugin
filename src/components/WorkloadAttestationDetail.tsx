@@ -242,7 +242,7 @@ export const WorkloadAttestationDetail: FC<{ w: CcWorkload; evidence?: EvidenceR
                         'A confidential guest is sealed — the console cannot exec into it. Add the self-reporting evidence sidecar so the workload publishes a verifiable attestation record (the released secret) the console can read.',
                       )}
                     </Content>
-                    <Link to="/confidential-containers/workloads/new">
+                    <Link to="/confidential-containers/workloads/~new">
                       {t('Create a workload with the evidence sidecar')}
                     </Link>
                   </Alert>

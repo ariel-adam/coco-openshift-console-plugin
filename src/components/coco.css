@@ -89,7 +89,7 @@
   overflow: auto;
   max-block-size: 72vh;
   padding: var(--pf-t--global--spacer--sm, 0.5rem);
-  border: 1px solid var(--pf-t--global--border--color--default);
+  border: var(--pf-t--global--border--width--regular) solid var(--pf-t--global--border--color--default);
   border-radius: var(--pf-t--global--border--radius--small, 3px);
   background-color: var(--pf-t--global--background--color--secondary--default);
 }
@@ -235,7 +235,7 @@
   gap: var(--pf-t--global--spacer--sm, 0.5rem);
   align-items: flex-start;
   padding: var(--pf-t--global--spacer--sm, 0.5rem);
-  border: 1px solid var(--pf-t--global--border--color--default);
+  border: var(--pf-t--global--border--width--regular) solid var(--pf-t--global--border--color--default);
   border-radius: var(--pf-t--global--border--radius--small, 3px);
   background-color: var(--pf-t--global--background--color--primary--default);
   font-size: var(--pf-t--global--font--size--sm, 0.875rem);

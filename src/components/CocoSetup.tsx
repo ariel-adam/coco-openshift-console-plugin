@@ -55,21 +55,11 @@ interface Step {
 
 const StatusIcon: FC<{ status: Status }> = ({ status }) => {
   if (status === 'done')
-    return (
-      <CheckCircleIcon
-        className="coco-openshift-console-plugin__icon-success"
-        color="var(--pf-t--global--icon--color--status--success--default)"
-      />
-    );
+    return <CheckCircleIcon className="coco-openshift-console-plugin__icon-success" />;
   if (status === 'warn')
     return <ExclamationTriangleIcon className="coco-openshift-console-plugin__icon-warning" />;
   if (status === 'info')
-    return (
-      <InfoCircleIcon
-        className="coco-openshift-console-plugin__icon-info"
-        color="var(--pf-t--global--icon--color--status--info--default)"
-      />
-    );
+    return <InfoCircleIcon className="coco-openshift-console-plugin__icon-info" />;
   return <PlusCircleIcon className="coco-openshift-console-plugin__muted" />;
 };
 
@@ -309,7 +299,7 @@ const CocoSetup: FC = () => {
           )
         : t('Available once the kata-cc runtime is installed on your TEE nodes.'),
       action: ccRuntimeReady
-        ? { label: t('Create workload'), href: '/confidential-containers/workloads/new' }
+        ? { label: t('Create workload'), href: '/confidential-containers/workloads/~new' }
         : undefined,
     },
   ];

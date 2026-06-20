@@ -34,7 +34,7 @@ import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternf
 import type { ISortBy, OnSort } from '@patternfly/react-table';
 import type { FC } from 'react';
 import { Fragment, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useConfidentialWorkloads } from '../k8s/hooks';
 import {
@@ -281,7 +281,11 @@ const ConfidentialWorkloadsList: FC = () => {
   return (
     <>
       <DocumentTitle>{t('Confidential workloads')}</DocumentTitle>
-      <ListPageHeader title={t('Confidential workloads')} />
+      <ListPageHeader title={t('Confidential workloads')}>
+        <Link to="/confidential-containers/workloads/~new">
+          <Button variant="primary">{t('Create workload')}</Button>
+        </Link>
+      </ListPageHeader>
       <PageSection>
         <Toolbar>
           <ToolbarContent>

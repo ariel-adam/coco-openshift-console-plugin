@@ -102,17 +102,6 @@
     "flags": { "required": ["COCO_KATACONFIG"] }
   },
   {
-    "type": "console.navigation/href",
-    "properties": {
-      "id": "cc-create",
-      "perspective": "admin",
-      "section": "confidential-containers",
-      "name": "%plugin__coco-openshift-console-plugin~Create workload%",
-      "href": "/confidential-containers/workloads/new"
-    },
-    "flags": { "required": ["COCO_KATACONFIG"] }
-  },
-  {
     "type": "console.page/route",
     "properties": {
       "exact": true,
@@ -170,7 +159,7 @@
     "type": "console.page/route",
     "properties": {
       "exact": true,
-      "path": "/confidential-containers/workloads/new",
+      "path": "/confidential-containers/workloads/~new",
       "component": { "$codeRef": "CreateConfidentialWorkload" }
     },
     "flags": { "required": ["COCO_KATACONFIG"] }

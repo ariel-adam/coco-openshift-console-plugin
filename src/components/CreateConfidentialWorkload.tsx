@@ -6,7 +6,6 @@ import {
   type K8sResourceCommon,
 } from '@openshift-console/dynamic-plugin-sdk';
 import {
-  ActionGroup,
   Alert,
   Button,
   Card,
@@ -15,6 +14,10 @@ import {
   Checkbox,
   CodeBlock,
   CodeBlockCode,
+  DescriptionList,
+  DescriptionListDescription,
+  DescriptionListGroup,
+  DescriptionListTerm,
   ExpandableSection,
   Form,
   FormGroup,
@@ -35,11 +38,13 @@ import {
   TextInput,
   TextInputGroup,
   TextInputGroupMain,
+  Wizard,
+  WizardStep,
 } from '@patternfly/react-core';
 import { ExternalLinkAltIcon } from '@patternfly/react-icons';
 import type { FC, Ref } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom-v5-compat';
+import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import {
   CC_INIT_DATA_ANNOTATION,
@@ -316,6 +321,18 @@ const CreateConfidentialWorkload: FC = () => {
     !luksHelperMissing &&
     (!evidenceSidecar || cdhPathValid);
 
+  // Light per-step Next gating, derived from the existing state above. These only
+  // block forward navigation; the final Create stays gated by the combined `valid`.
+  const generalStepValid = name.trim() !== '' && nsTrimmed !== '';
+  const imageStepValid = image.trim() !== '';
+  const initdataStepValid = initdata.trim() !== '';
+  // Storage step: if encryption is on, require the PVC name/size and a real LUKS
+  // helper image (same conditions `valid` enforces); otherwise freely navigable.
+  const storageStepValid =
+    !enc || (effectivePvcName.trim() !== '' && pvcSize.trim() !== '' && !luksHelperMissing);
+  // Evidence step: if the sidecar is on, require a valid CDH resource path.
+  const securityStepValid = !evidenceSidecar || cdhPathValid;
+
   const buildPvc = (): K8sResourceCommon =>
     ({
       apiVersion: 'v1',
@@ -338,7 +355,7 @@ const CreateConfidentialWorkload: FC = () => {
         apiVersion: 'v1',
         kind: 'ServiceAccount',
         metadata: { name: rbacName, namespace: nsTrimmed },
-      } as K8sResourceCommon,
+      },
       {
         apiVersion: 'rbac.authorization.k8s.io/v1',
         kind: 'Role',
@@ -502,7 +519,7 @@ const CreateConfidentialWorkload: FC = () => {
             apiVersion: 'v1',
             kind: 'Namespace',
             metadata: { name: nsTrimmed },
-          } as K8sResourceCommon,
+          },
         });
       }
       // 2) Provision RBAC for the evidence sidecar before the workload that uses
@@ -535,7 +552,7 @@ const CreateConfidentialWorkload: FC = () => {
         model: kind === 'Pod' ? PodModel : DeploymentModel,
         data: buildManifest(trimmedInitdata),
       });
-      navigate('/confidential-containers/workloads');
+      void navigate('/confidential-containers/workloads');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -548,586 +565,682 @@ const CreateConfidentialWorkload: FC = () => {
       <DocumentTitle>{t('Create confidential workload')}</DocumentTitle>
       <ListPageHeader title={t('Create confidential workload')} />
       <PageSection>
-        <Grid hasGutter>
-          <GridItem md={6}>
-            <Card>
-              <CardTitle>{t('Workload')}</CardTitle>
-              <CardBody>
-                <Form>
-                  <FormGroup label={t('Kind')} fieldId="cw-kind">
-                    <FormSelect
-                      id="cw-kind"
-                      value={kind}
-                      onChange={(_e, v) => {
-                        setKind(v as Kind);
+        <Wizard
+          onClose={() => {
+            void navigate('/confidential-containers/workloads');
+          }}
+          onSave={() => void create()}
+        >
+          <WizardStep
+            name={t('General')}
+            id="cw-step-general"
+            footer={{ isNextDisabled: !generalStepValid }}
+          >
+            <Form>
+              <FormGroup label={t('Kind')} fieldId="cw-kind">
+                <FormSelect
+                  id="cw-kind"
+                  value={kind}
+                  onChange={(_e, v) => {
+                    setKind(v as Kind);
+                  }}
+                >
+                  <FormSelectOption value="Pod" label="Pod" />
+                  <FormSelectOption value="Deployment" label="Deployment" />
+                </FormSelect>
+              </FormGroup>
+              <FormGroup label={t('Name')} isRequired fieldId="cw-name">
+                <TextInput
+                  id="cw-name"
+                  value={name}
+                  onChange={(_e, v) => {
+                    setName(v);
+                  }}
+                />
+              </FormGroup>
+              <FormGroup label={t('Namespace')} isRequired fieldId="cw-namespace">
+                <Select
+                  isOpen={nsOpen}
+                  selected={namespaceExists ? nsTrimmed : undefined}
+                  onSelect={(_e, value) => {
+                    if (value === CREATE_NS_SENTINEL) {
+                      selectNamespace(nsTypedValue);
+                    } else if (typeof value === 'string') {
+                      selectNamespace(value);
+                    }
+                  }}
+                  onOpenChange={(isOpen) => {
+                    setNsOpen(isOpen);
+                  }}
+                  toggle={(toggleRef: Ref<MenuToggleElement>) => (
+                    <MenuToggle
+                      variant="typeahead"
+                      aria-label={t('Namespace')}
+                      ref={toggleRef}
+                      isExpanded={nsOpen}
+                      isFullWidth
+                      onClick={() => {
+                        setNsOpen(!nsOpen);
                       }}
                     >
-                      <FormSelectOption value="Pod" label="Pod" />
-                      <FormSelectOption value="Deployment" label="Deployment" />
-                    </FormSelect>
-                  </FormGroup>
-                  <FormGroup label={t('Name')} isRequired fieldId="cw-name">
-                    <TextInput
-                      id="cw-name"
-                      value={name}
-                      onChange={(_e, v) => {
-                        setName(v);
-                      }}
-                    />
-                  </FormGroup>
-                  <FormGroup label={t('Namespace')} isRequired fieldId="cw-namespace">
-                    <Select
-                      isOpen={nsOpen}
-                      selected={namespaceExists ? nsTrimmed : undefined}
-                      onSelect={(_e, value) => {
-                        if (value === CREATE_NS_SENTINEL) {
-                          selectNamespace(nsTypedValue);
-                        } else if (typeof value === 'string') {
-                          selectNamespace(value);
-                        }
-                      }}
-                      onOpenChange={(isOpen) => {
-                        setNsOpen(isOpen);
-                      }}
-                      toggle={(toggleRef: Ref<MenuToggleElement>) => (
-                        <MenuToggle
-                          variant="typeahead"
-                          aria-label={t('Namespace')}
-                          ref={toggleRef}
+                      <TextInputGroup isPlain>
+                        <TextInputGroupMain
+                          id="cw-namespace"
+                          value={nsInput}
+                          innerRef={nsToggleRef}
+                          placeholder={t('Select or enter a namespace')}
+                          role="combobox"
                           isExpanded={nsOpen}
-                          isFullWidth
+                          aria-controls="cw-namespace-listbox"
                           onClick={() => {
                             setNsOpen(!nsOpen);
                           }}
+                          onChange={(_e, v) => {
+                            setNsInput(v);
+                            setNamespace(v);
+                            if (!nsOpen) setNsOpen(true);
+                          }}
+                        />
+                      </TextInputGroup>
+                    </MenuToggle>
+                  )}
+                >
+                  <SelectList id="cw-namespace-listbox">
+                    {filteredNs.map((ns) => (
+                      <SelectOption key={ns} value={ns}>
+                        {ns}
+                      </SelectOption>
+                    ))}
+                    {showCreateNsOption && (
+                      <SelectOption key="__create__" value={CREATE_NS_SENTINEL}>
+                        {t('Create new namespace: {{name}}', { name: nsTypedValue })}
+                      </SelectOption>
+                    )}
+                    {filteredNs.length === 0 && !showCreateNsOption && (
+                      <SelectOption isDisabled value="__none__">
+                        {t('No namespaces found')}
+                      </SelectOption>
+                    )}
+                  </SelectList>
+                </Select>
+                {nsTrimmed !== '' && !namespaceExists && (
+                  <HelperText>
+                    <HelperTextItem variant="warning">
+                      {t('Namespace {{name}} does not exist yet and will be created.', {
+                        name: nsTrimmed,
+                      })}
+                    </HelperTextItem>
+                  </HelperText>
+                )}
+              </FormGroup>
+              {kind === 'Deployment' && (
+                <FormGroup label={t('Replicas')} fieldId="cw-replicas">
+                  <TextInput
+                    id="cw-replicas"
+                    type="number"
+                    value={replicas}
+                    onChange={(_e, v) => {
+                      setReplicas(v);
+                    }}
+                  />
+                </FormGroup>
+              )}
+            </Form>
+          </WizardStep>
+
+          <WizardStep
+            name={t('Image & command')}
+            id="cw-step-image"
+            footer={{ isNextDisabled: !imageStepValid }}
+          >
+            <Form>
+              <FormGroup label={t('Image')} isRequired fieldId="cw-image">
+                <TextInput
+                  id="cw-image"
+                  value={image}
+                  onChange={(_e, v) => {
+                    setImage(v);
+                  }}
+                />
+              </FormGroup>
+              <FormGroup label={t('Runtime class')} fieldId="cw-rc">
+                <FormSelect
+                  id="cw-rc"
+                  value={runtimeClass}
+                  onChange={(_e, v) => {
+                    setRuntimeClass(v as RuntimeClass);
+                  }}
+                >
+                  <FormSelectOption value="kata-cc" label="kata-cc" />
+                  <FormSelectOption value="kata-cc-nvidia-gpu" label="kata-cc-nvidia-gpu" />
+                </FormSelect>
+              </FormGroup>
+              {runtimeClass === 'kata-cc-nvidia-gpu' && (
+                <Alert
+                  variant="info"
+                  isInline
+                  title={t('Confidential GPU prerequisites (Tech Preview)')}
+                  className="coco-openshift-console-plugin__mb"
+                >
+                  <p className="coco-openshift-console-plugin__mb">
+                    {t(
+                      'The kata-cc-nvidia-gpu runtime needs the GPU stack enabled on your TEE nodes first (NVIDIA H100, bare metal only):',
+                    )}
+                  </p>
+                  <ul className="coco-openshift-console-plugin__mb">
+                    <li>
+                      {t('An IOMMU MachineConfig (intel_iommu=on / amd_iommu=on) — reboots nodes.')}
+                    </li>
+                    <li>
+                      {t(
+                        'The NVIDIA GPU Operator with a ClusterPolicy enabling ccManager (CC mode on), the kata sandbox device plugin, and vfio-manager.',
+                      )}
+                    </li>
+                    <li>
+                      {t(
+                        'Nodes labeled nvidia.com/cc.mode.state=on, nvidia.com/cc.ready.state=true, and a TEE label.',
+                      )}
+                    </li>
+                  </ul>
+                  <a
+                    href="https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/index.html"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t('NVIDIA GPU Operator documentation')}
+                  </a>
+                </Alert>
+              )}
+              <FormGroup label={t('Command (optional)')} fieldId="cw-command">
+                <TextInput
+                  id="cw-command"
+                  value={command}
+                  onChange={(_e, v) => {
+                    setCommand(v);
+                  }}
+                />
+              </FormGroup>
+            </Form>
+          </WizardStep>
+
+          <WizardStep
+            name={t('Initdata')}
+            id="cw-step-initdata"
+            footer={{ isNextDisabled: !initdataStepValid }}
+          >
+            <Form>
+              <FormGroup
+                label={t('Initdata (cc_init_data annotation)')}
+                isRequired
+                fieldId="cw-initdata"
+              >
+                {sharedInitdataOptions.length > 0 && (
+                  <div className="coco-openshift-console-plugin__mb">
+                    <Select
+                      isOpen={sharedPickerOpen}
+                      onSelect={(_e, value) => {
+                        const picked = sharedInitdataOptions.find((o) => o.name === value);
+                        if (picked) setInitdata(picked.value);
+                        setSharedPickerOpen(false);
+                      }}
+                      onOpenChange={(isOpen) => {
+                        setSharedPickerOpen(isOpen);
+                      }}
+                      toggle={(toggleRef: Ref<MenuToggleElement>) => (
+                        <MenuToggle
+                          id="cw-initdata-shared"
+                          ref={toggleRef}
+                          isExpanded={sharedPickerOpen}
+                          onClick={() => {
+                            setSharedPickerOpen(!sharedPickerOpen);
+                          }}
                         >
-                          <TextInputGroup isPlain>
-                            <TextInputGroupMain
-                              id="cw-namespace"
-                              value={nsInput}
-                              innerRef={nsToggleRef}
-                              placeholder={t('Select or enter a namespace')}
-                              role="combobox"
-                              isExpanded={nsOpen}
-                              aria-controls="cw-namespace-listbox"
-                              onClick={() => {
-                                setNsOpen(!nsOpen);
-                              }}
-                              onChange={(_e, v) => {
-                                setNsInput(v);
-                                setNamespace(v);
-                                if (!nsOpen) setNsOpen(true);
-                              }}
-                            />
-                          </TextInputGroup>
+                          {t('Use initdata from Trustee on this cluster')}
                         </MenuToggle>
                       )}
                     >
-                      <SelectList id="cw-namespace-listbox">
-                        {filteredNs.map((ns) => (
-                          <SelectOption key={ns} value={ns}>
-                            {ns}
+                      <SelectList>
+                        {sharedInitdataOptions.map((o) => (
+                          <SelectOption
+                            key={o.name}
+                            value={o.name}
+                            description={
+                              o.kbsUrl ? t('KBS: {{url}}', { url: o.kbsUrl }) : undefined
+                            }
+                          >
+                            {o.name}
                           </SelectOption>
                         ))}
-                        {showCreateNsOption && (
-                          <SelectOption key="__create__" value={CREATE_NS_SENTINEL}>
-                            {t('Create new namespace: {{name}}', { name: nsTypedValue })}
-                          </SelectOption>
+                      </SelectList>
+                    </Select>
+                    <HelperText>
+                      <HelperTextItem>
+                        {t(
+                          'Optional: a Trustee co-located on this cluster shared these initdata ConfigMaps in this namespace. Picking one fills the field below; you can still edit or paste your own.',
                         )}
-                        {filteredNs.length === 0 && !showCreateNsOption && (
+                      </HelperTextItem>
+                    </HelperText>
+                  </div>
+                )}
+                <TextArea
+                  id="cw-initdata"
+                  value={initdata}
+                  onChange={(_e, v) => {
+                    setInitdata(v);
+                  }}
+                  rows={4}
+                  placeholder={t('Paste the gzip+base64 value.')}
+                />
+                <FormHelperText>
+                  <HelperText>
+                    <HelperTextItem>
+                      {t(
+                        'Initdata comes from your attestation service (e.g. Trustee), generated against the KBS your workload will attest to. It can run on this cluster or a remote one (hub-and-spoke). Without it the workload cannot attest.',
+                      )}
+                    </HelperTextItem>
+                  </HelperText>
+                </FormHelperText>
+                {kbsUnreachableWarn && (
+                  <Alert
+                    variant="warning"
+                    isInline
+                    title={t('This initdata points at an in-cluster KBS')}
+                    className="coco-openshift-console-plugin__mt"
+                  >
+                    {t(
+                      'The pasted initdata attests to {{host}}, an in-cluster Service name that only resolves on the cluster that hosts it. If this workload runs on a different (spoke or air-gapped) cluster it cannot reach that KBS and will fail to attest at runtime. Use the attestation service’s external Route URL for cross-cluster workloads. You can still create the workload.',
+                      { host: decodedKbsHost ?? '' },
+                    )}
+                  </Alert>
+                )}
+                {initdataInvalidWarn && (
+                  <Alert
+                    variant="warning"
+                    isInline
+                    title={t('This doesn’t look like valid initdata')}
+                    className="coco-openshift-console-plugin__mt"
+                  >
+                    {t(
+                      'The pasted value didn’t decode to an initdata.toml — it should be the gzip+base64 cc_init_data your attestation service produced. Check that you copied the whole value. You can still create the workload, but it will not attest.',
+                    )}
+                  </Alert>
+                )}
+                {httpsNoCertWarn && (
+                  <Alert
+                    variant="warning"
+                    isInline
+                    title={t('HTTPS KBS with no certificate pinned')}
+                    className="coco-openshift-console-plugin__mt"
+                  >
+                    {t(
+                      'This initdata uses an https:// KBS URL but pins no certificate. The in-guest Confidential Data Hub validates the KBS against the certificate baked into initdata, so without one it cannot establish TLS and the workload fails to attest. Regenerate the initdata with the KBS certificate, or point it at the plain-http KBS endpoint. You can still create the workload.',
+                    )}
+                  </Alert>
+                )}
+                {trimmedInitdata !== '' && (
+                  <ExpandableSection
+                    toggleText={t('Verify pasted initdata ({{count}} chars, fnv1a {{sum}})', {
+                      count: trimmedInitdata.length,
+                      sum: initdataChecksum,
+                    })}
+                    className="coco-openshift-console-plugin__mt"
+                  >
+                    <CodeBlock>
+                      <CodeBlockCode>{trimmedInitdata}</CodeBlockCode>
+                    </CodeBlock>
+                  </ExpandableSection>
+                )}
+              </FormGroup>
+            </Form>
+          </WizardStep>
+
+          <WizardStep
+            name={t('Storage')}
+            id="cw-step-storage"
+            footer={{ isNextDisabled: !storageStepValid }}
+          >
+            <Form>
+              <FormGroup fieldId="cw-enc">
+                <Checkbox
+                  id="cw-enc"
+                  label={t('Add an encrypted block volume (LUKS)')}
+                  description={t(
+                    'Attach a raw-block PVC that an init container opens with LUKS inside the TEE, using a passphrase Trustee delivers only after attestation.',
+                  )}
+                  isChecked={enc}
+                  onChange={(_e, checked) => {
+                    setEnc(checked);
+                  }}
+                />
+              </FormGroup>
+              {enc && (
+                <>
+                  <FormGroup label={t('PVC name')} isRequired fieldId="cw-pvc-name">
+                    <TextInput
+                      id="cw-pvc-name"
+                      value={effectivePvcName}
+                      onChange={(_e, v) => {
+                        setPvcNameTouched(true);
+                        setPvcName(v);
+                      }}
+                    />
+                  </FormGroup>
+                  <FormGroup label={t('Size')} isRequired fieldId="cw-pvc-size">
+                    <TextInput
+                      id="cw-pvc-size"
+                      value={pvcSize}
+                      onChange={(_e, v) => {
+                        setPvcSize(v);
+                      }}
+                    />
+                  </FormGroup>
+                  <FormGroup label={t('Storage class')} fieldId="cw-pvc-sc">
+                    <Select
+                      isOpen={scOpen}
+                      selected={effectiveSc}
+                      onSelect={(_e, value) => {
+                        setScTouched(true);
+                        setStorageClass(typeof value === 'string' ? value : '');
+                        setScOpen(false);
+                      }}
+                      onOpenChange={(isOpen) => {
+                        setScOpen(isOpen);
+                      }}
+                      toggle={(toggleRef: Ref<MenuToggleElement>) => (
+                        <MenuToggle
+                          id="cw-pvc-sc"
+                          ref={toggleRef}
+                          isExpanded={scOpen}
+                          isFullWidth
+                          onClick={() => {
+                            setScOpen(!scOpen);
+                          }}
+                        >
+                          {effectiveSc || t('Use cluster default')}
+                        </MenuToggle>
+                      )}
+                    >
+                      <SelectList>
+                        {scNames.length === 0 ? (
                           <SelectOption isDisabled value="__none__">
-                            {t('No namespaces found')}
+                            {t('No storage classes found')}
                           </SelectOption>
+                        ) : (
+                          scNames.map((sc) => (
+                            <SelectOption key={sc} value={sc}>
+                              {sc === defaultSc ? t('{{name}} (default)', { name: sc }) : sc}
+                            </SelectOption>
+                          ))
                         )}
                       </SelectList>
                     </Select>
-                    {nsTrimmed !== '' && !namespaceExists && (
-                      <HelperText>
-                        <HelperTextItem variant="warning">
-                          {t('Namespace {{name}} does not exist yet and will be created.', {
-                            name: nsTrimmed,
-                          })}
-                        </HelperTextItem>
-                      </HelperText>
-                    )}
                   </FormGroup>
-                  <FormGroup label={t('Image')} isRequired fieldId="cw-image">
+                  <FormGroup label={t('Device path')} fieldId="cw-device-path">
                     <TextInput
-                      id="cw-image"
-                      value={image}
+                      id="cw-device-path"
+                      value={devicePath}
                       onChange={(_e, v) => {
-                        setImage(v);
+                        setDevicePath(v);
                       }}
                     />
                   </FormGroup>
-                  <FormGroup label={t('Runtime class')} fieldId="cw-rc">
-                    <FormSelect
-                      id="cw-rc"
-                      value={runtimeClass}
-                      onChange={(_e, v) => {
-                        setRuntimeClass(v as RuntimeClass);
-                      }}
-                    >
-                      <FormSelectOption value="kata-cc" label="kata-cc" />
-                      <FormSelectOption value="kata-cc-nvidia-gpu" label="kata-cc-nvidia-gpu" />
-                    </FormSelect>
-                  </FormGroup>
-                  {runtimeClass === 'kata-cc-nvidia-gpu' && (
-                    <Alert
-                      variant="info"
-                      isInline
-                      title={t('Confidential GPU prerequisites (Tech Preview)')}
-                      className="coco-openshift-console-plugin__mb"
-                    >
-                      <p className="coco-openshift-console-plugin__mb">
-                        {t(
-                          'The kata-cc-nvidia-gpu runtime needs the GPU stack enabled on your TEE nodes first (NVIDIA H100, bare metal only):',
-                        )}
-                      </p>
-                      <ul className="coco-openshift-console-plugin__mb">
-                        <li>
-                          {t(
-                            'An IOMMU MachineConfig (intel_iommu=on / amd_iommu=on) — reboots nodes.',
-                          )}
-                        </li>
-                        <li>
-                          {t(
-                            'The NVIDIA GPU Operator with a ClusterPolicy enabling ccManager (CC mode on), the kata sandbox device plugin, and vfio-manager.',
-                          )}
-                        </li>
-                        <li>
-                          {t(
-                            'Nodes labeled nvidia.com/cc.mode.state=on, nvidia.com/cc.ready.state=true, and a TEE label.',
-                          )}
-                        </li>
-                      </ul>
-                      <a
-                        href="https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/index.html"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {t('NVIDIA GPU Operator documentation')}
-                      </a>
-                    </Alert>
-                  )}
-                  {kind === 'Deployment' && (
-                    <FormGroup label={t('Replicas')} fieldId="cw-replicas">
-                      <TextInput
-                        id="cw-replicas"
-                        type="number"
-                        value={replicas}
-                        onChange={(_e, v) => {
-                          setReplicas(v);
-                        }}
-                      />
-                    </FormGroup>
-                  )}
-                  <FormGroup label={t('Command (optional)')} fieldId="cw-command">
+                  <FormGroup label={t('Passphrase source')} fieldId="cw-passphrase">
                     <TextInput
-                      id="cw-command"
-                      value={command}
+                      id="cw-passphrase"
+                      value={passphraseSource}
                       onChange={(_e, v) => {
-                        setCommand(v);
+                        setPassphraseSource(v);
                       }}
                     />
+                    <HelperText>
+                      <HelperTextItem>
+                        {t(
+                          'A Trustee-delivered passphrase reference like kbs:///default/luks/passphrase, or a Kubernetes Secret name.',
+                        )}
+                      </HelperTextItem>
+                    </HelperText>
                   </FormGroup>
-                  <FormGroup
-                    label={t('Initdata (cc_init_data annotation)')}
-                    isRequired
-                    fieldId="cw-initdata"
-                  >
-                    {sharedInitdataOptions.length > 0 && (
-                      <div className="coco-openshift-console-plugin__mb">
-                        <Select
-                          isOpen={sharedPickerOpen}
-                          onSelect={(_e, value) => {
-                            const picked = sharedInitdataOptions.find((o) => o.name === value);
-                            if (picked) setInitdata(picked.value);
-                            setSharedPickerOpen(false);
-                          }}
-                          onOpenChange={(isOpen) => {
-                            setSharedPickerOpen(isOpen);
-                          }}
-                          toggle={(toggleRef: Ref<MenuToggleElement>) => (
-                            <MenuToggle
-                              id="cw-initdata-shared"
-                              ref={toggleRef}
-                              isExpanded={sharedPickerOpen}
-                              onClick={() => {
-                                setSharedPickerOpen(!sharedPickerOpen);
-                              }}
-                            >
-                              {t('Use initdata from Trustee on this cluster')}
-                            </MenuToggle>
-                          )}
-                        >
-                          <SelectList>
-                            {sharedInitdataOptions.map((o) => (
-                              <SelectOption
-                                key={o.name}
-                                value={o.name}
-                                description={
-                                  o.kbsUrl ? t('KBS: {{url}}', { url: o.kbsUrl }) : undefined
-                                }
-                              >
-                                {o.name}
-                              </SelectOption>
-                            ))}
-                          </SelectList>
-                        </Select>
-                        <HelperText>
-                          <HelperTextItem>
-                            {t(
-                              'Optional: a Trustee co-located on this cluster shared these initdata ConfigMaps in this namespace. Picking one fills the field below; you can still edit or paste your own.',
-                            )}
-                          </HelperTextItem>
-                        </HelperText>
-                      </div>
-                    )}
-                    <TextArea
-                      id="cw-initdata"
-                      value={initdata}
+                  <FormGroup label={t('LUKS helper image')} isRequired fieldId="cw-helper-image">
+                    <TextInput
+                      id="cw-helper-image"
+                      value={helperImage}
+                      placeholder={LUKS_HELPER_PLACEHOLDER}
+                      validated={luksHelperMissing ? 'error' : 'default'}
                       onChange={(_e, v) => {
-                        setInitdata(v);
-                      }}
-                      rows={4}
-                      placeholder={t('Paste the gzip+base64 value.')}
-                    />
-                    <FormHelperText>
-                      <HelperText>
-                        <HelperTextItem>
-                          {t(
-                            'Initdata comes from your attestation service (e.g. Trustee), generated against the KBS your workload will attest to. It can run on this cluster or a remote one (hub-and-spoke). Without it the workload cannot attest.',
-                          )}
-                        </HelperTextItem>
-                      </HelperText>
-                    </FormHelperText>
-                    {kbsUnreachableWarn && (
-                      <Alert
-                        variant="warning"
-                        isInline
-                        title={t('This initdata points at an in-cluster KBS')}
-                        className="coco-openshift-console-plugin__mt"
-                      >
-                        {t(
-                          'The pasted initdata attests to {{host}}, an in-cluster Service name that only resolves on the cluster that hosts it. If this workload runs on a different (spoke or air-gapped) cluster it cannot reach that KBS and will fail to attest at runtime. Use the attestation service’s external Route URL for cross-cluster workloads. You can still create the workload.',
-                          { host: decodedKbsHost ?? '' },
-                        )}
-                      </Alert>
-                    )}
-                    {initdataInvalidWarn && (
-                      <Alert
-                        variant="warning"
-                        isInline
-                        title={t('This doesn’t look like valid initdata')}
-                        className="coco-openshift-console-plugin__mt"
-                      >
-                        {t(
-                          'The pasted value didn’t decode to an initdata.toml — it should be the gzip+base64 cc_init_data your attestation service produced. Check that you copied the whole value. You can still create the workload, but it will not attest.',
-                        )}
-                      </Alert>
-                    )}
-                    {httpsNoCertWarn && (
-                      <Alert
-                        variant="warning"
-                        isInline
-                        title={t('HTTPS KBS with no certificate pinned')}
-                        className="coco-openshift-console-plugin__mt"
-                      >
-                        {t(
-                          'This initdata uses an https:// KBS URL but pins no certificate. The in-guest Confidential Data Hub validates the KBS against the certificate baked into initdata, so without one it cannot establish TLS and the workload fails to attest. Regenerate the initdata with the KBS certificate, or point it at the plain-http KBS endpoint. You can still create the workload.',
-                        )}
-                      </Alert>
-                    )}
-                    {trimmedInitdata !== '' && (
-                      <ExpandableSection
-                        toggleText={t('Verify pasted initdata ({{count}} chars, fnv1a {{sum}})', {
-                          count: trimmedInitdata.length,
-                          sum: initdataChecksum,
-                        })}
-                        className="coco-openshift-console-plugin__mt"
-                      >
-                        <CodeBlock>
-                          <CodeBlockCode>{trimmedInitdata}</CodeBlockCode>
-                        </CodeBlock>
-                      </ExpandableSection>
-                    )}
-                  </FormGroup>
-
-                  <FormGroup fieldId="cw-enc">
-                    <Checkbox
-                      id="cw-enc"
-                      label={t('Add an encrypted block volume (LUKS)')}
-                      description={t(
-                        'Attach a raw-block PVC that an init container opens with LUKS inside the TEE, using a passphrase Trustee delivers only after attestation.',
-                      )}
-                      isChecked={enc}
-                      onChange={(_e, checked) => {
-                        setEnc(checked);
+                        setHelperImage(v);
                       }}
                     />
-                  </FormGroup>
-                  {enc && (
-                    <>
-                      <FormGroup label={t('PVC name')} isRequired fieldId="cw-pvc-name">
-                        <TextInput
-                          id="cw-pvc-name"
-                          value={effectivePvcName}
-                          onChange={(_e, v) => {
-                            setPvcNameTouched(true);
-                            setPvcName(v);
-                          }}
-                        />
-                      </FormGroup>
-                      <FormGroup label={t('Size')} isRequired fieldId="cw-pvc-size">
-                        <TextInput
-                          id="cw-pvc-size"
-                          value={pvcSize}
-                          onChange={(_e, v) => {
-                            setPvcSize(v);
-                          }}
-                        />
-                      </FormGroup>
-                      <FormGroup label={t('Storage class')} fieldId="cw-pvc-sc">
-                        <Select
-                          isOpen={scOpen}
-                          selected={effectiveSc}
-                          onSelect={(_e, value) => {
-                            setScTouched(true);
-                            setStorageClass(typeof value === 'string' ? value : '');
-                            setScOpen(false);
-                          }}
-                          onOpenChange={(isOpen) => {
-                            setScOpen(isOpen);
-                          }}
-                          toggle={(toggleRef: Ref<MenuToggleElement>) => (
-                            <MenuToggle
-                              id="cw-pvc-sc"
-                              ref={toggleRef}
-                              isExpanded={scOpen}
-                              isFullWidth
-                              onClick={() => {
-                                setScOpen(!scOpen);
-                              }}
-                            >
-                              {effectiveSc || t('Use cluster default')}
-                            </MenuToggle>
-                          )}
-                        >
-                          <SelectList>
-                            {scNames.length === 0 ? (
-                              <SelectOption isDisabled value="__none__">
-                                {t('No storage classes found')}
-                              </SelectOption>
-                            ) : (
-                              scNames.map((sc) => (
-                                <SelectOption key={sc} value={sc}>
-                                  {sc === defaultSc ? t('{{name}} (default)', { name: sc }) : sc}
-                                </SelectOption>
-                              ))
+                    <HelperText>
+                      <HelperTextItem variant={luksHelperMissing ? 'error' : 'default'}>
+                        {luksHelperMissing
+                          ? t(
+                              'A real LUKS helper image is required — the placeholder is not a usable image, and leaving it would let Create succeed and then fail at container start. Build/supply an image whose init container opens the LUKS device with the passphrase on boot.',
+                            )
+                          : t(
+                              'Image whose init container opens the LUKS device with the passphrase on boot.',
                             )}
-                          </SelectList>
-                        </Select>
-                      </FormGroup>
-                      <FormGroup label={t('Device path')} fieldId="cw-device-path">
-                        <TextInput
-                          id="cw-device-path"
-                          value={devicePath}
-                          onChange={(_e, v) => {
-                            setDevicePath(v);
-                          }}
-                        />
-                      </FormGroup>
-                      <FormGroup label={t('Passphrase source')} fieldId="cw-passphrase">
-                        <TextInput
-                          id="cw-passphrase"
-                          value={passphraseSource}
-                          onChange={(_e, v) => {
-                            setPassphraseSource(v);
-                          }}
-                        />
-                        <HelperText>
-                          <HelperTextItem>
-                            {t(
-                              'A Trustee-delivered passphrase reference like kbs:///default/luks/passphrase, or a Kubernetes Secret name.',
-                            )}
-                          </HelperTextItem>
-                        </HelperText>
-                      </FormGroup>
-                      <FormGroup
-                        label={t('LUKS helper image')}
-                        isRequired
-                        fieldId="cw-helper-image"
-                      >
-                        <TextInput
-                          id="cw-helper-image"
-                          value={helperImage}
-                          placeholder={LUKS_HELPER_PLACEHOLDER}
-                          validated={luksHelperMissing ? 'error' : 'default'}
-                          onChange={(_e, v) => {
-                            setHelperImage(v);
-                          }}
-                        />
-                        <HelperText>
-                          <HelperTextItem variant={luksHelperMissing ? 'error' : 'default'}>
-                            {luksHelperMissing
-                              ? t(
-                                  'A real LUKS helper image is required — the placeholder is not a usable image, and leaving it would let Create succeed and then fail at container start. Build/supply an image whose init container opens the LUKS device with the passphrase on boot.',
-                                )
-                              : t(
-                                  'Image whose init container opens the LUKS device with the passphrase on boot.',
-                                )}
-                          </HelperTextItem>
-                        </HelperText>
-                        <Button
-                          variant="link"
-                          isInline
-                          component="a"
-                          href={LUKS_HELPER_DOCS_URL}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          icon={<ExternalLinkAltIcon />}
-                          iconPosition="end"
-                        >
-                          {t('LUKS-in-TEE documentation')}
-                        </Button>
-                      </FormGroup>
-                    </>
-                  )}
-
-                  <FormGroup fieldId="cw-evidence">
-                    <Checkbox
-                      id="cw-evidence"
-                      label={t(
-                        'Add attestation evidence sidecar (self-reporting, no exec required)',
-                      )}
-                      description={t(
-                        'Run a declared container inside the TEE that continuously fetches a KBS resource to prove attestation and publishes a timestamped evidence record the Trustee plugin reads.',
-                      )}
-                      isChecked={evidenceSidecar}
-                      onChange={(_e, checked) => {
-                        setEvidenceSidecar(checked);
-                      }}
-                    />
-                  </FormGroup>
-                  {evidenceSidecar && (
-                    <>
-                      <Alert
-                        variant="info"
-                        isInline
-                        title={t('How the evidence sidecar works')}
-                        className="coco-openshift-console-plugin__mb"
-                      >
-                        <p className="coco-openshift-console-plugin__mb">
-                          {t(
-                            'The sidecar runs inside the TEE as a declared container — not via oc exec, which secure confidential workloads forbid. It proves attestation by fetching a KBS resource through the Confidential Data Hub (the resource is only released after a successful attestation) and pushes a timestamped evidence record to a ConfigMap.',
-                          )}
-                        </p>
-                        <p className="coco-openshift-console-plugin__mb">
-                          {t(
-                            'It uses a tiny ubi-minimal image and pushes the evidence to the Kubernetes API with curl (no oc, no python), so it fits inside the confidential guest VM.',
-                          )}
-                        </p>
-                        <p>
-                          {t(
-                            'The sidecar publishes that record as a ConfigMap the Trustee plugin reads in its Attestation status view. It must be present at pod creation; it cannot be added to a running pod.',
-                          )}
-                        </p>
-                      </Alert>
-                      <FormGroup
-                        label={t('CDH resource path')}
-                        isRequired
-                        fieldId="cw-evidence-cdh"
-                      >
-                        <TextInput
-                          id="cw-evidence-cdh"
-                          value={evidenceCdhPath}
-                          validated={cdhPathValid ? 'default' : 'error'}
-                          onChange={(_e, v) => {
-                            setEvidenceCdhPath(v);
-                          }}
-                        />
-                        <HelperText>
-                          <HelperTextItem variant={cdhPathValid ? 'default' : 'error'}>
-                            {cdhPathValid
-                              ? t(
-                                  'A KBS resource the guest fetches as proof it attested — released only after a successful attestation. Use the full path <repository>/<name>/<key>, e.g. default/kbsres1/key1.',
-                                )
-                              : t(
-                                  'Enter the full path <repository>/<name>/<key> (3 segments), e.g. default/kbsres1/key1. A two-segment path like default/kbsres1 is a folder, not a resource, and returns 404.',
-                                )}
-                          </HelperTextItem>
-                        </HelperText>
-                      </FormGroup>
-                      <FormGroup
-                        label={t('Refresh interval seconds')}
-                        fieldId="cw-evidence-interval"
-                      >
-                        <TextInput
-                          id="cw-evidence-interval"
-                          type="number"
-                          value={evidenceInterval}
-                          onChange={(_e, v) => {
-                            setEvidenceInterval(v);
-                          }}
-                        />
-                      </FormGroup>
-                    </>
-                  )}
-
-                  <FormGroup fieldId="cw-nonroot">
-                    <Checkbox
-                      id="cw-nonroot"
-                      label={t('Run as non-root')}
-                      description={t(
-                        'Adds runAsNonRoot: true so the pod meets the restricted Pod Security Standard (allowPrivilegeEscalation: false, dropped capabilities, and the RuntimeDefault seccomp profile are always set). Untick only if your image must run as root.',
-                      )}
-                      isChecked={runAsNonRoot}
-                      onChange={(_e, checked) => {
-                        setRunAsNonRoot(checked);
-                      }}
-                    />
-                  </FormGroup>
-
-                  {error && (
-                    <Alert variant="danger" isInline title={t('Could not create workload')}>
-                      {error}
-                    </Alert>
-                  )}
-
-                  <ActionGroup>
-                    <Button
-                      variant="primary"
-                      onClick={() => void create()}
-                      isLoading={busy}
-                      isDisabled={busy || !valid}
-                    >
-                      {t('Create')}
-                    </Button>
+                      </HelperTextItem>
+                    </HelperText>
                     <Button
                       variant="link"
-                      onClick={() => {
-                        navigate('/confidential-containers/workloads');
-                      }}
+                      isInline
+                      component="a"
+                      href={LUKS_HELPER_DOCS_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      icon={<ExternalLinkAltIcon />}
+                      iconPosition="end"
                     >
-                      {t('Cancel')}
+                      {t('LUKS-in-TEE documentation')}
                     </Button>
-                  </ActionGroup>
-                </Form>
-              </CardBody>
-            </Card>
-          </GridItem>
+                  </FormGroup>
+                </>
+              )}
+            </Form>
+          </WizardStep>
 
-          <GridItem md={6}>
-            <Card>
-              <CardTitle>{t('Manifest preview')}</CardTitle>
-              <CardBody>
-                <CodeBlock>
-                  <CodeBlockCode>{preview}</CodeBlockCode>
-                </CodeBlock>
-              </CardBody>
-            </Card>
-          </GridItem>
-        </Grid>
+          <WizardStep
+            name={t('Evidence & security')}
+            id="cw-step-security"
+            footer={{ isNextDisabled: !securityStepValid }}
+          >
+            <Form>
+              <FormGroup fieldId="cw-evidence">
+                <Checkbox
+                  id="cw-evidence"
+                  label={t('Add attestation evidence sidecar (self-reporting, no exec required)')}
+                  description={t(
+                    'Run a declared container inside the TEE that continuously fetches a KBS resource to prove attestation and publishes a timestamped evidence record the Trustee plugin reads.',
+                  )}
+                  isChecked={evidenceSidecar}
+                  onChange={(_e, checked) => {
+                    setEvidenceSidecar(checked);
+                  }}
+                />
+              </FormGroup>
+              {evidenceSidecar && (
+                <>
+                  <Alert
+                    variant="info"
+                    isInline
+                    title={t('How the evidence sidecar works')}
+                    className="coco-openshift-console-plugin__mb"
+                  >
+                    <p className="coco-openshift-console-plugin__mb">
+                      {t(
+                        'The sidecar runs inside the TEE as a declared container — not via oc exec, which secure confidential workloads forbid. It proves attestation by fetching a KBS resource through the Confidential Data Hub (the resource is only released after a successful attestation) and pushes a timestamped evidence record to a ConfigMap.',
+                      )}
+                    </p>
+                    <p className="coco-openshift-console-plugin__mb">
+                      {t(
+                        'It uses a tiny ubi-minimal image and pushes the evidence to the Kubernetes API with curl (no oc, no python), so it fits inside the confidential guest VM.',
+                      )}
+                    </p>
+                    <p>
+                      {t(
+                        'The sidecar publishes that record as a ConfigMap the Trustee plugin reads in its Attestation status view. It must be present at pod creation; it cannot be added to a running pod.',
+                      )}
+                    </p>
+                  </Alert>
+                  <FormGroup label={t('CDH resource path')} isRequired fieldId="cw-evidence-cdh">
+                    <TextInput
+                      id="cw-evidence-cdh"
+                      value={evidenceCdhPath}
+                      validated={cdhPathValid ? 'default' : 'error'}
+                      onChange={(_e, v) => {
+                        setEvidenceCdhPath(v);
+                      }}
+                    />
+                    <HelperText>
+                      <HelperTextItem variant={cdhPathValid ? 'default' : 'error'}>
+                        {cdhPathValid
+                          ? t(
+                              'A KBS resource the guest fetches as proof it attested — released only after a successful attestation. Use the full path <repository>/<name>/<key>, e.g. default/kbsres1/key1.',
+                            )
+                          : t(
+                              'Enter the full path <repository>/<name>/<key> (3 segments), e.g. default/kbsres1/key1. A two-segment path like default/kbsres1 is a folder, not a resource, and returns 404.',
+                            )}
+                      </HelperTextItem>
+                    </HelperText>
+                  </FormGroup>
+                  <FormGroup label={t('Refresh interval seconds')} fieldId="cw-evidence-interval">
+                    <TextInput
+                      id="cw-evidence-interval"
+                      type="number"
+                      value={evidenceInterval}
+                      onChange={(_e, v) => {
+                        setEvidenceInterval(v);
+                      }}
+                    />
+                  </FormGroup>
+                </>
+              )}
+
+              <FormGroup fieldId="cw-nonroot">
+                <Checkbox
+                  id="cw-nonroot"
+                  label={t('Run as non-root')}
+                  description={t(
+                    'Adds runAsNonRoot: true so the pod meets the restricted Pod Security Standard (allowPrivilegeEscalation: false, dropped capabilities, and the RuntimeDefault seccomp profile are always set). Untick only if your image must run as root.',
+                  )}
+                  isChecked={runAsNonRoot}
+                  onChange={(_e, checked) => {
+                    setRunAsNonRoot(checked);
+                  }}
+                />
+              </FormGroup>
+            </Form>
+          </WizardStep>
+
+          <WizardStep
+            name={t('Review')}
+            id="cw-step-review"
+            footer={{ nextButtonText: t('Create'), isNextDisabled: busy || !valid }}
+          >
+            {error && (
+              <Alert
+                variant="danger"
+                isInline
+                title={t('Could not create workload')}
+                className="coco-openshift-console-plugin__mb"
+              >
+                {error}
+              </Alert>
+            )}
+            <Grid hasGutter>
+              <GridItem md={6}>
+                <Card isCompact>
+                  <CardTitle>{t('Summary')}</CardTitle>
+                  <CardBody>
+                    <DescriptionList isHorizontal isCompact>
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>{t('Kind')}</DescriptionListTerm>
+                        <DescriptionListDescription>{kind}</DescriptionListDescription>
+                      </DescriptionListGroup>
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>{t('Name')}</DescriptionListTerm>
+                        <DescriptionListDescription>{name.trim()}</DescriptionListDescription>
+                      </DescriptionListGroup>
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>{t('Namespace')}</DescriptionListTerm>
+                        <DescriptionListDescription>
+                          {nsTrimmed}
+                          {!namespaceExists && nsTrimmed !== '' ? ` (${t('to be created')})` : ''}
+                        </DescriptionListDescription>
+                      </DescriptionListGroup>
+                      {kind === 'Deployment' && (
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Replicas')}</DescriptionListTerm>
+                          <DescriptionListDescription>
+                            {Number(replicas) || 1}
+                          </DescriptionListDescription>
+                        </DescriptionListGroup>
+                      )}
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>{t('Image')}</DescriptionListTerm>
+                        <DescriptionListDescription>{image.trim()}</DescriptionListDescription>
+                      </DescriptionListGroup>
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>{t('Runtime class')}</DescriptionListTerm>
+                        <DescriptionListDescription>{runtimeClass}</DescriptionListDescription>
+                      </DescriptionListGroup>
+                      {command.trim() !== '' && (
+                        <DescriptionListGroup>
+                          <DescriptionListTerm>{t('Command')}</DescriptionListTerm>
+                          <DescriptionListDescription>{command.trim()}</DescriptionListDescription>
+                        </DescriptionListGroup>
+                      )}
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>{t('Initdata')}</DescriptionListTerm>
+                        <DescriptionListDescription>
+                          {trimmedInitdata !== ''
+                            ? t('{{count}} chars, fnv1a {{sum}}', {
+                                count: trimmedInitdata.length,
+                                sum: initdataChecksum,
+                              })
+                            : t('Not set')}
+                        </DescriptionListDescription>
+                      </DescriptionListGroup>
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>{t('Encrypted volume')}</DescriptionListTerm>
+                        <DescriptionListDescription>
+                          {enc
+                            ? t('{{name}} ({{size}})', {
+                                name: effectivePvcName.trim(),
+                                size: pvcSize.trim(),
+                              })
+                            : t('None')}
+                        </DescriptionListDescription>
+                      </DescriptionListGroup>
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>{t('Evidence sidecar')}</DescriptionListTerm>
+                        <DescriptionListDescription>
+                          {evidenceSidecar ? t('Enabled') : t('Disabled')}
+                        </DescriptionListDescription>
+                      </DescriptionListGroup>
+                      <DescriptionListGroup>
+                        <DescriptionListTerm>{t('Run as non-root')}</DescriptionListTerm>
+                        <DescriptionListDescription>
+                          {runAsNonRoot ? t('Yes') : t('No')}
+                        </DescriptionListDescription>
+                      </DescriptionListGroup>
+                    </DescriptionList>
+                  </CardBody>
+                </Card>
+              </GridItem>
+              <GridItem md={6}>
+                <Card isCompact>
+                  <CardTitle>{t('Manifest preview')}</CardTitle>
+                  <CardBody>
+                    <CodeBlock>
+                      <CodeBlockCode>{preview}</CodeBlockCode>
+                    </CodeBlock>
+                  </CardBody>
+                </Card>
+              </GridItem>
+            </Grid>
+          </WizardStep>
+        </Wizard>
       </PageSection>
     </>
   );

@@ -57,6 +57,14 @@
   background-color: var(--pf-t--global--icon--color--status--danger--default);
 }
 
+.coco-openshift-console-plugin__detail-tabs {
+  margin-block-start: var(--pf-t--global--spacer--md, 1rem);
+}
+
+.coco-openshift-console-plugin__breadcrumb-section {
+  padding-block-end: 0;
+}
+
 /* Monaco needs an explicit height on an ancestor or it collapses (YAML tabs). */
 .coco-openshift-console-plugin__yaml {
   block-size: 36rem;

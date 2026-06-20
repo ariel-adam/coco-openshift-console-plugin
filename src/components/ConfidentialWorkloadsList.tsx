@@ -30,32 +30,23 @@ import {
   ToolbarItem,
 } from '@patternfly/react-core';
 import { EllipsisVIcon } from '@patternfly/react-icons';
-import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
+import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import type { ISortBy, OnSort } from '@patternfly/react-table';
 import type { FC } from 'react';
-import { Fragment, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom-v5-compat';
+import { useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useConfidentialWorkloads } from '../k8s/hooks';
-import {
-  ConfigMapGVK,
-  DeploymentGVK,
-  DeploymentModel,
-  NamespaceGVK,
-  PodGVK,
-  PodModel,
-} from '../k8s/resources';
+import { ConfigMapGVK, DeploymentModel, NamespaceGVK, PodModel } from '../k8s/resources';
 import type { CcWorkload, ConfigMapKind } from '../k8s/types';
 import { statusCategory, statusColor } from '../utils/status';
 import { EVIDENCE_LABEL, parseEvidence, type EvidenceRecord } from '../utils/evidence';
 import { CcClassLabel } from './CcClassLabel';
-import { WorkloadAttestationDetail } from './WorkloadAttestationDetail';
 import './coco.css';
 
-// Column order: expand, Name, Namespace, Kind, Runtime, Confidentiality, Initdata,
-// Status, Attestation, Restarts, Node, Created, Actions.
+// Column order: Name, Namespace, Kind, Runtime, Confidentiality, Initdata,
+// Status, Report, Restarts, Node, Created, Actions.
 const SORTABLE_FIELDS: (keyof CcWorkload | null)[] = [
-  null, // expand toggle
   'name',
   'namespace',
   'kind',
@@ -63,7 +54,7 @@ const SORTABLE_FIELDS: (keyof CcWorkload | null)[] = [
   null, // confidentiality
   null, // initdata
   'status',
-  null, // attestation
+  null, // report
   null, // restarts
   null, // node
   'creationTimestamp',
@@ -113,7 +104,7 @@ const SkeletonTable: FC = () => {
     <Table aria-label={t('Loading')} variant="compact">
       <Thead>
         <Tr>
-          {Array.from({ length: 10 }, (_, i) => (
+          {Array.from({ length: 12 }, (_, i) => (
             <Th key={i}>
               <Skeleton width="5rem" />
             </Th>
@@ -123,7 +114,7 @@ const SkeletonTable: FC = () => {
       <Tbody>
         {Array.from({ length: 5 }, (_, i) => (
           <Tr key={i}>
-            {Array.from({ length: 10 }, (_, j) => (
+            {Array.from({ length: 12 }, (_, j) => (
               <Td key={j}>
                 <Skeleton width={j === 0 ? '10rem' : '6rem'} />
               </Td>
@@ -174,17 +165,6 @@ const ConfidentialWorkloadsList: FC = () => {
   const [sortBy, setSortBy] = useState<ISortBy>({});
   const [toDelete, setToDelete] = useState<CcWorkload | undefined>();
   const [deleting, setDeleting] = useState(false);
-
-  // Expandable per-workload attestation detail.
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const isOpen = (uid: string) => expanded.has(uid);
-  const toggle = (uid: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(uid)) next.delete(uid);
-      else next.add(uid);
-      return next;
-    });
 
   // Self-reported attestation evidence: ConfigMaps the in-guest sidecar publishes
   // (no exec). Keyed by namespace/<configmap-name> so each workload finds its own.
@@ -246,9 +226,9 @@ const ConfidentialWorkloadsList: FC = () => {
     if (sortBy.index === undefined) return filtered;
     const field = SORTABLE_FIELDS[sortBy.index];
     if (!field) return filtered;
-    const sorted = [...filtered].sort((a, b) =>
-      String(a[field] ?? '').localeCompare(String(b[field] ?? '')),
-    );
+    const cell = (v: unknown): string =>
+      typeof v === 'string' || typeof v === 'number' ? String(v) : '';
+    const sorted = [...filtered].sort((a, b) => cell(a[field]).localeCompare(cell(b[field])));
     return sortBy.direction === 'desc' ? sorted.reverse() : sorted;
   }, [workloads, text, ccFilter, nsFilter, statusFilter, rcFilter, sortBy]);
 
@@ -436,119 +416,86 @@ const ConfidentialWorkloadsList: FC = () => {
           <Table aria-label={t('Confidential workloads')} variant="compact">
             <Thead>
               <Tr>
-                <Th screenReaderText={t('Expand row')} />
-                <Th sort={getSortParams(1)}>{t('Name')}</Th>
-                <Th sort={getSortParams(2)}>{t('Namespace')}</Th>
-                <Th sort={getSortParams(3)}>{t('Kind')}</Th>
+                <Th sort={getSortParams(0)}>{t('Name')}</Th>
+                <Th sort={getSortParams(1)}>{t('Namespace')}</Th>
+                <Th sort={getSortParams(2)}>{t('Kind')}</Th>
                 <Th>{t('Runtime class')}</Th>
                 <Th>{t('Confidentiality')}</Th>
                 <Th>{t('Initdata')}</Th>
-                <Th sort={getSortParams(7)}>{t('Status')}</Th>
+                <Th sort={getSortParams(6)}>{t('Status')}</Th>
                 <Th>{t('Report')}</Th>
                 <Th>{t('Restarts')}</Th>
                 <Th>{t('Node')}</Th>
-                <Th sort={getSortParams(11)}>{t('Created')}</Th>
+                <Th sort={getSortParams(10)}>{t('Created')}</Th>
                 <Th screenReaderText={t('Actions')} />
               </Tr>
             </Thead>
             <Tbody>
-              {rows.map((w, rowIndex) => {
+              {rows.map((w) => {
                 const ev = evidenceFor(w);
                 const verdict = evidenceVerdictLabel(ev);
-                // Only a workload that actually self-reports (has an evidence
-                // sidecar) can be expanded for detail.
-                const expandable = !!ev;
                 return (
-                  <Fragment key={w.uid}>
-                    <Tr>
-                      {expandable ? (
-                        <Td
-                          expand={{
-                            rowIndex,
-                            isExpanded: isOpen(w.uid),
-                            onToggle: () => {
-                              toggle(w.uid);
-                            },
-                            expandId: `att-${w.uid}`,
-                          }}
-                        />
+                  <Tr key={w.uid}>
+                    <Td dataLabel={t('Name')}>
+                      <Link to={`/confidential-containers/workloads/${w.namespace}/${w.name}`}>
+                        {w.name}
+                      </Link>
+                    </Td>
+                    <Td dataLabel={t('Namespace')}>
+                      <ResourceLink groupVersionKind={NamespaceGVK} name={w.namespace} linkTo />
+                    </Td>
+                    <Td dataLabel={t('Kind')}>{w.kind}</Td>
+                    <Td
+                      dataLabel={t('Runtime class')}
+                      className="coco-openshift-console-plugin__mono"
+                    >
+                      {w.runtimeClass}
+                    </Td>
+                    <Td dataLabel={t('Confidentiality')}>
+                      <CcClassLabel ccClass={w.ccClass} isCompact />
+                    </Td>
+                    <Td dataLabel={t('Initdata')}>
+                      {w.hasInitData ? (
+                        <Label color="green" isCompact>
+                          {t('Yes')}
+                        </Label>
                       ) : (
-                        <Td />
+                        <Label color="grey" isCompact>
+                          {t('No')}
+                        </Label>
                       )}
-                      <Td dataLabel={t('Name')}>
-                        <ResourceLink
-                          groupVersionKind={w.kind === 'Pod' ? PodGVK : DeploymentGVK}
-                          name={w.name}
-                          namespace={w.namespace}
-                          hideIcon
-                        />
-                      </Td>
-                      <Td dataLabel={t('Namespace')}>
-                        <ResourceLink groupVersionKind={NamespaceGVK} name={w.namespace} linkTo />
-                      </Td>
-                      <Td dataLabel={t('Kind')}>{w.kind}</Td>
-                      <Td
-                        dataLabel={t('Runtime class')}
-                        className="coco-openshift-console-plugin__mono"
-                      >
-                        {w.runtimeClass}
-                      </Td>
-                      <Td dataLabel={t('Confidentiality')}>
-                        <CcClassLabel ccClass={w.ccClass} isCompact />
-                      </Td>
-                      <Td dataLabel={t('Initdata')}>
-                        {w.hasInitData ? (
-                          <Label color="green" isCompact>
-                            {t('Yes')}
-                          </Label>
-                        ) : (
-                          <Label color="grey" isCompact>
-                            {t('No')}
-                          </Label>
-                        )}
-                      </Td>
-                      <Td dataLabel={t('Status')}>
-                        <Label color={statusColor(w.status)} isCompact>
-                          {w.ready ? `${w.status} (${w.ready})` : w.status}
-                        </Label>
-                      </Td>
-                      <Td dataLabel={t('Report')}>
-                        <Label color={verdict.color} isCompact>
-                          {verdict.text}
-                        </Label>
-                      </Td>
-                      <Td dataLabel={t('Restarts')}>
-                        {w.kind === 'Pod' ? (
-                          (w.restarts ?? 0)
-                        ) : (
-                          <span className="coco-openshift-console-plugin__muted">—</span>
-                        )}
-                      </Td>
-                      <Td dataLabel={t('Node')}>
-                        {w.node ? (
-                          <span className="coco-openshift-console-plugin__mono">{w.node}</span>
-                        ) : (
-                          <span className="coco-openshift-console-plugin__muted">—</span>
-                        )}
-                      </Td>
-                      <Td dataLabel={t('Created')}>
-                        <Timestamp timestamp={w.creationTimestamp} />
-                      </Td>
-                      <Td isActionCell>
-                        <RowActions w={w} onDelete={setToDelete} />
-                      </Td>
-                    </Tr>
-                    {expandable && (
-                      <Tr isExpanded={isOpen(w.uid)}>
-                        <Td />
-                        <Td dataLabel={t('Report detail')} colSpan={12}>
-                          <ExpandableRowContent>
-                            <WorkloadAttestationDetail w={w} evidence={ev} />
-                          </ExpandableRowContent>
-                        </Td>
-                      </Tr>
-                    )}
-                  </Fragment>
+                    </Td>
+                    <Td dataLabel={t('Status')}>
+                      <Label color={statusColor(w.status)} isCompact>
+                        {w.ready ? `${w.status} (${w.ready})` : w.status}
+                      </Label>
+                    </Td>
+                    <Td dataLabel={t('Report')}>
+                      <Label color={verdict.color} isCompact>
+                        {verdict.text}
+                      </Label>
+                    </Td>
+                    <Td dataLabel={t('Restarts')}>
+                      {w.kind === 'Pod' ? (
+                        (w.restarts ?? 0)
+                      ) : (
+                        <span className="coco-openshift-console-plugin__muted">—</span>
+                      )}
+                    </Td>
+                    <Td dataLabel={t('Node')}>
+                      {w.node ? (
+                        <span className="coco-openshift-console-plugin__mono">{w.node}</span>
+                      ) : (
+                        <span className="coco-openshift-console-plugin__muted">—</span>
+                      )}
+                    </Td>
+                    <Td dataLabel={t('Created')}>
+                      <Timestamp timestamp={w.creationTimestamp} />
+                    </Td>
+                    <Td isActionCell>
+                      <RowActions w={w} onDelete={setToDelete} />
+                    </Td>
+                  </Tr>
                 );
               })}
             </Tbody>

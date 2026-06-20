@@ -163,5 +163,14 @@
       "component": { "$codeRef": "CreateConfidentialWorkload" }
     },
     "flags": { "required": ["COCO_KATACONFIG"] }
+  },
+  {
+    "type": "console.page/route",
+    "properties": {
+      "exact": true,
+      "path": "/confidential-containers/workloads/:ns/:name",
+      "component": { "$codeRef": "ConfidentialWorkloadDetail" }
+    },
+    "flags": { "required": ["COCO_KATACONFIG"] }
   }
 ]

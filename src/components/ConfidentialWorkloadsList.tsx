@@ -405,7 +405,7 @@ const ConfidentialWorkloadsList: FC = () => {
             <EmptyStateBody>
               {workloads.length === 0
                 ? t(
-                    'Confidential workloads use a kata-cc runtime class and run inside a hardware TEE. Deploy one with runtimeClassName: kata-cc and initdata to see it here.',
+                    'Confidential workloads use a kata-cc runtime class (bare-metal TEE) or kata-remote (cloud peer-pod). Deploy one with runtimeClassName: kata-cc or kata-remote to see it here.',
                   )
                 : t('{{count}} confidential workloads are hidden by the active filters.', {
                     count: workloads.length,

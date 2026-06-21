@@ -22,12 +22,26 @@ export const classForRuntimeClass = (rc: RuntimeClassKind): CcClass => {
   return 'unknown';
 };
 
+/** True for hardware TEE runtimes (kata-cc family). */
 export const isConfidentialClass = (c: CcClass): boolean =>
   c === 'confidential' || c === 'confidential-gpu';
+
+/**
+ * True for any runtime class that delivers workload isolation beyond a plain
+ * container: hardware TEEs (kata-cc) AND cloud peer-pods (kata-remote).
+ * Use this when listing all "confidential containers" workloads in the plugin,
+ * so that peer-pod deployments appear alongside bare-metal TEE workloads.
+ */
+export const isCcWorkloadClass = (c: CcClass): boolean =>
+  isConfidentialClass(c) || c === 'peerpod';
 
 /** Is this RuntimeClass one of the confidential (kata-cc) runtimes? */
 export const isConfidentialRuntimeClass = (rc: RuntimeClassKind): boolean =>
   isConfidentialClass(classForRuntimeClass(rc));
+
+/** Is this RuntimeClass any CoCo workload runtime (kata-cc OR kata-remote)? */
+export const isCcWorkloadRuntimeClass = (rc: RuntimeClassKind): boolean =>
+  isCcWorkloadClass(classForRuntimeClass(rc));
 
 export const ccClassLabel = (c: CcClass): string => {
   switch (c) {
@@ -51,7 +65,7 @@ export const ccClassDescription = (c: CcClass): string => {
     case 'confidential-gpu':
       return 'Confidential microVM with an attested NVIDIA GPU (kata-cc-nvidia-gpu).';
     case 'peerpod':
-      return 'Runs in a dedicated cloud VM on a separate host (kata-remote).';
+      return 'Runs in a dedicated cloud VM provisioned per-pod (kata-remote). Provides VM-level isolation; combine with a CVM instance type (e.g. Azure DCas_v5) for hardware memory encryption.';
     case 'sandbox':
       return 'Sandboxed microVM on the worker node, without confidential computing.';
     default:

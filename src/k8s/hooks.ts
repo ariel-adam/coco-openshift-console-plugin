@@ -20,7 +20,7 @@ import type {
   RuntimeClassKind,
   TeeNode,
 } from './types';
-import { classForRuntimeClass, isConfidentialClass } from '../utils/runtime';
+import { classForRuntimeClass, isCcWorkloadClass } from '../utils/runtime';
 import { teeNode } from '../utils/tee';
 import { podDisplayStatus, podRestartCount } from '../utils/status';
 
@@ -91,7 +91,7 @@ export const useConfidentialWorkloads = (): { workloads: CcWorkload[]; loaded: b
     runtimeClasses.forEach((rc) => {
       const cc = classForRuntimeClass(rc);
       const name = rc.metadata?.name;
-      if (name && isConfidentialClass(cc)) map[name] = cc;
+      if (name && isCcWorkloadClass(cc)) map[name] = cc;
     });
     return map;
   }, [runtimeClasses]);

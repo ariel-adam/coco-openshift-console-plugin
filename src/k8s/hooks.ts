@@ -45,15 +45,14 @@ export const useKataConfig = (): [KataConfigKind | undefined, boolean] => {
  * Is confidential containers enabled?
  *
  * Returns true when ANY of the following is true:
- *  1. `osc-feature-gates` ConfigMap has `confidential: "true"` — bare-metal
- *     kata-cc (TEE nodes, TDX/SEV-SNP), OR
- *  2. `peer-pods-cm` has `PEER_PODS: "true"` AND `DISABLECVM != "true"` —
- *     cloud peer-pod CoCo with actual Confidential VMs (kata-remote + CVM).
- *     When DISABLECVM=true the peer-pod VMs are standard (non-CVM) Azure VMs
- *     and are NOT confidential, so we exclude them from the CoCo view.
+ *  1. `osc-feature-gates` has `confidential: "true"` — bare-metal kata-cc
+ *     (TEE nodes, TDX/SEV-SNP), OR
+ *  2. `osc-feature-gates` has `PEER_PODS: "true"` AND `peer-pods-cm` has
+ *     `DISABLECVM != "true"` — cloud peer-pod CoCo where the backing VMs are
+ *     actual Confidential VMs. When DISABLECVM=true the peer-pod VMs are
+ *     standard (non-CVM) Azure VMs and are NOT counted as confidential.
  *
- * This accurately reflects whether hardware-backed confidential computing is
- * active: kata-cc for on-prem TEE, kata-remote+CVM for cloud peer-pods.
+ * Note: PEER_PODS lives in osc-feature-gates; DISABLECVM lives in peer-pods-cm.
  */
 export const useConfidentialEnabled = (): [boolean | undefined, boolean] => {
   const [featureGatesCm, fgLoaded, fgLoadError] = useK8sWatchResource<ConfigMapKind>({
@@ -74,10 +73,10 @@ export const useConfidentialEnabled = (): [boolean | undefined, boolean] => {
   // Bare-metal TEE: kata-cc feature gate enabled
   const hasKataCc = featureGatesCm?.data?.confidential === 'true';
 
-  // Cloud peer-pod CoCo: kata-remote runtime exists AND the VMs are actual CVMs
-  // (DISABLECVM must NOT be "true" — when true the VMs are standard non-CVM VMs)
+  // Cloud peer-pod CoCo: PEER_PODS enabled (osc-feature-gates) AND VMs are
+  // actual CVMs (DISABLECVM=false in peer-pods-cm).
   const hasCvmPeerPods =
-    peerPodsCm?.data?.PEER_PODS === 'true' &&
+    featureGatesCm?.data?.PEER_PODS === 'true' &&
     peerPodsCm?.data?.DISABLECVM !== 'true';
 
   return [settled ? (hasKataCc || hasCvmPeerPods) : undefined, settled];

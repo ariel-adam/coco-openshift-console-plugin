@@ -380,7 +380,7 @@ const ConfidentialContainersOverview: FC = () => {
               <CardBody>
                 {confidentialRCs.length === 0 ? (
                   <span className="coco-openshift-console-plugin__muted">
-                    {t('No confidential (kata-cc) runtime classes found.')}
+                    {t('No confidential (kata-cc) or peer-pod (kata-remote) runtime classes found.')}
                   </span>
                 ) : (
                   <Flex direction={{ default: 'column' }}>

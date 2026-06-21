@@ -41,19 +41,46 @@ export const useKataConfig = (): [KataConfigKind | undefined, boolean] => {
   return [data?.[0], loaded];
 };
 
-/** Is confidential containers enabled (osc-feature-gates ConfigMap, confidential: "true")? */
+/**
+ * Is confidential containers enabled?
+ *
+ * Returns true when ANY of the following is true:
+ *  1. `osc-feature-gates` ConfigMap has `confidential: "true"` — bare-metal
+ *     kata-cc (TEE nodes, TDX/SEV-SNP), OR
+ *  2. `peer-pods-cm` has `PEER_PODS: "true"` AND `DISABLECVM != "true"` —
+ *     cloud peer-pod CoCo with actual Confidential VMs (kata-remote + CVM).
+ *     When DISABLECVM=true the peer-pod VMs are standard (non-CVM) Azure VMs
+ *     and are NOT confidential, so we exclude them from the CoCo view.
+ *
+ * This accurately reflects whether hardware-backed confidential computing is
+ * active: kata-cc for on-prem TEE, kata-remote+CVM for cloud peer-pods.
+ */
 export const useConfidentialEnabled = (): [boolean | undefined, boolean] => {
-  const [cm, loaded, loadError] = useK8sWatchResource<ConfigMapKind>({
+  const [featureGatesCm, fgLoaded, fgLoadError] = useK8sWatchResource<ConfigMapKind>({
     groupVersionKind: ConfigMapGVK,
     namespace: OSC_NAMESPACE,
     name: OSC_FEATURE_GATES_CM,
   });
-  // A named resource that doesn't exist yet 404s: loadError is set but `loaded`
-  // never flips true. Treat the watch as settled once it is loaded OR errored, so
-  // consumers that gate on the loaded flag don't show a spinner forever when the
-  // osc-feature-gates ConfigMap is absent (it just reads as "not enabled").
-  const settled = loaded || Boolean(loadError);
-  return [settled ? cm?.data?.confidential === 'true' : undefined, settled];
+  const [peerPodsCm, ppLoaded, ppLoadError] = useK8sWatchResource<ConfigMapKind>({
+    groupVersionKind: ConfigMapGVK,
+    namespace: OSC_NAMESPACE,
+    name: 'peer-pods-cm',
+  });
+
+  const settled =
+    (fgLoaded || Boolean(fgLoadError)) &&
+    (ppLoaded || Boolean(ppLoadError));
+
+  // Bare-metal TEE: kata-cc feature gate enabled
+  const hasKataCc = featureGatesCm?.data?.confidential === 'true';
+
+  // Cloud peer-pod CoCo: kata-remote runtime exists AND the VMs are actual CVMs
+  // (DISABLECVM must NOT be "true" — when true the VMs are standard non-CVM VMs)
+  const hasCvmPeerPods =
+    peerPodsCm?.data?.PEER_PODS === 'true' &&
+    peerPodsCm?.data?.DISABLECVM !== 'true';
+
+  return [settled ? (hasKataCc || hasCvmPeerPods) : undefined, settled];
 };
 
 export const useNodes = (): [NodeKind[], boolean] => {

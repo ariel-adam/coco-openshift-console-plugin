@@ -41,19 +41,34 @@ export const useKataConfig = (): [KataConfigKind | undefined, boolean] => {
   return [data?.[0], loaded];
 };
 
-/** Is confidential containers enabled (osc-feature-gates ConfigMap, confidential: "true")? */
+/**
+ * Is confidential containers enabled?
+ *
+ * Returns true when ANY of the following is true:
+ *  1. `osc-feature-gates` ConfigMap has `confidential: "true"` — bare-metal
+ *     kata-cc (TEE nodes, TDX/SEV-SNP), OR
+ *  2. `osc-feature-gates` has `PEER_PODS: "true"` — cloud peer-pod CoCo
+ *     deployment via kata-remote, OR
+ *  3. A `kata-remote` RuntimeClass exists — peer-pod CoCo is active even if
+ *     the feature gate ConfigMap is absent or differently labelled.
+ *
+ * This allows the plugin to surface workloads for both on-prem TEE and cloud
+ * peer-pod (Azure/AWS/GCP) confidential containers deployments.
+ */
 export const useConfidentialEnabled = (): [boolean | undefined, boolean] => {
   const [cm, loaded, loadError] = useK8sWatchResource<ConfigMapKind>({
     groupVersionKind: ConfigMapGVK,
     namespace: OSC_NAMESPACE,
     name: OSC_FEATURE_GATES_CM,
   });
-  // A named resource that doesn't exist yet 404s: loadError is set but `loaded`
-  // never flips true. Treat the watch as settled once it is loaded OR errored, so
-  // consumers that gate on the loaded flag don't show a spinner forever when the
-  // osc-feature-gates ConfigMap is absent (it just reads as "not enabled").
-  const settled = loaded || Boolean(loadError);
-  return [settled ? cm?.data?.confidential === 'true' : undefined, settled];
+  const [rcs, rcsLoaded] = useRuntimeClasses();
+
+  const settled = (loaded || Boolean(loadError)) && rcsLoaded;
+  const hasPeerPods =
+    cm?.data?.confidential === 'true' ||
+    cm?.data?.PEER_PODS === 'true' ||
+    rcs.some((rc) => rc.metadata?.name === 'kata-remote');
+  return [settled ? hasPeerPods : undefined, settled];
 };
 
 export const useNodes = (): [NodeKind[], boolean] => {

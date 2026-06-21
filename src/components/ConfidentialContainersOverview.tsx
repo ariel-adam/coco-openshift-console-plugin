@@ -197,7 +197,7 @@ const ConfidentialContainersOverview: FC = () => {
               >
                 <EmptyStateBody>
                   {t(
-                    'The Confidential Containers menu is available because sandboxed containers (KataConfig) is installed, but the confidential feature is still off. Enabling it sets confidential: "true" on the osc-feature-gates ConfigMap, so the OpenShift sandboxed containers operator installs the kata-cc runtime on your TEE nodes. This reboots the sandboxed-containers nodes, one at a time.',
+                    'The Confidential Containers menu is available because sandboxed containers (KataConfig) is installed, but neither the kata-cc (bare-metal TEE) nor kata-remote (cloud peer-pod) runtime is active yet. For bare-metal TEE nodes, enable confidential containers below. For cloud peer-pods, create a KataConfig with enablePeerPods: true and configure the Cloud API Adaptor.',
                   )}
                 </EmptyStateBody>
                 <EmptyStateFooter>

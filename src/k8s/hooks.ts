@@ -47,28 +47,40 @@ export const useKataConfig = (): [KataConfigKind | undefined, boolean] => {
  * Returns true when ANY of the following is true:
  *  1. `osc-feature-gates` ConfigMap has `confidential: "true"` — bare-metal
  *     kata-cc (TEE nodes, TDX/SEV-SNP), OR
- *  2. `osc-feature-gates` has `PEER_PODS: "true"` — cloud peer-pod CoCo
- *     deployment via kata-remote, OR
- *  3. A `kata-remote` RuntimeClass exists — peer-pod CoCo is active even if
- *     the feature gate ConfigMap is absent or differently labelled.
+ *  2. `peer-pods-cm` has `PEER_PODS: "true"` AND `DISABLECVM != "true"` —
+ *     cloud peer-pod CoCo with actual Confidential VMs (kata-remote + CVM).
+ *     When DISABLECVM=true the peer-pod VMs are standard (non-CVM) Azure VMs
+ *     and are NOT confidential, so we exclude them from the CoCo view.
  *
- * This allows the plugin to surface workloads for both on-prem TEE and cloud
- * peer-pod (Azure/AWS/GCP) confidential containers deployments.
+ * This accurately reflects whether hardware-backed confidential computing is
+ * active: kata-cc for on-prem TEE, kata-remote+CVM for cloud peer-pods.
  */
 export const useConfidentialEnabled = (): [boolean | undefined, boolean] => {
-  const [cm, loaded, loadError] = useK8sWatchResource<ConfigMapKind>({
+  const [featureGatesCm, fgLoaded, fgLoadError] = useK8sWatchResource<ConfigMapKind>({
     groupVersionKind: ConfigMapGVK,
     namespace: OSC_NAMESPACE,
     name: OSC_FEATURE_GATES_CM,
   });
-  const [rcs, rcsLoaded] = useRuntimeClasses();
+  const [peerPodsCm, ppLoaded, ppLoadError] = useK8sWatchResource<ConfigMapKind>({
+    groupVersionKind: ConfigMapGVK,
+    namespace: OSC_NAMESPACE,
+    name: 'peer-pods-cm',
+  });
 
-  const settled = (loaded || Boolean(loadError)) && rcsLoaded;
-  const hasPeerPods =
-    cm?.data?.confidential === 'true' ||
-    cm?.data?.PEER_PODS === 'true' ||
-    rcs.some((rc) => rc.metadata?.name === 'kata-remote');
-  return [settled ? hasPeerPods : undefined, settled];
+  const settled =
+    (fgLoaded || Boolean(fgLoadError)) &&
+    (ppLoaded || Boolean(ppLoadError));
+
+  // Bare-metal TEE: kata-cc feature gate enabled
+  const hasKataCc = featureGatesCm?.data?.confidential === 'true';
+
+  // Cloud peer-pod CoCo: kata-remote runtime exists AND the VMs are actual CVMs
+  // (DISABLECVM must NOT be "true" — when true the VMs are standard non-CVM VMs)
+  const hasCvmPeerPods =
+    peerPodsCm?.data?.PEER_PODS === 'true' &&
+    peerPodsCm?.data?.DISABLECVM !== 'true';
+
+  return [settled ? (hasKataCc || hasCvmPeerPods) : undefined, settled];
 };
 
 export const useNodes = (): [NodeKind[], boolean] => {
